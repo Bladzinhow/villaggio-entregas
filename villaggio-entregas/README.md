@@ -103,3 +103,34 @@ Se você não tiver mais acesso ao DNS também, me avise — nesse caso o app fu
 - Papéis diferentes para síndico vs. porteiro (hoje todo mundo logado tem o mesmo acesso)
 
 Me avise qual desses você quer que eu construa a seguir.
+
+---
+
+## Parte 4 — Cadastro pelo entregador (novidade)
+
+Agora existe uma segunda porta de entrada no app, sem necessidade de login:
+
+**`https://SEU-SITE.vercel.app/nova`**
+
+O entregador abre esse link (pelo próprio celular, via QR code, ou num tablet fixo na portaria), preenche os dados da encomenda, e ela cai numa fila de espera — **não vira uma encomenda "de verdade" até o porteiro conferir**.
+
+### Como pegar o link/QR code
+
+1. Logado no app, clique no botão **"Link do entregador"** (ao lado de "Exportar Excel"). Ele copia o link automaticamente.
+2. Vá em um gerador de QR code gratuito, por exemplo **qr-code-generator.com** ou **qrcode-monkey.com**, cole o link, gere a imagem, baixe e imprima/plastifique para fixar na guarita.
+3. (Opcional, para o futuro) O mesmo link pode ser aberto direto num tablet fixo na portaria — não precisa de nenhuma mudança no app para isso.
+
+### Como o porteiro confere
+
+1. No app, clique na aba **"Conferência"** (mostra quantas estão esperando).
+2. Compare o que foi digitado com o pacote físico na mão (peso, tamanho, etc.).
+3. Clique em **"Aceitar"** → ela vira uma encomenda pendente normal, e o morador pode ser avisado por WhatsApp.
+4. Ou clique em **"Recusar"** → escolha o motivo (peso incompatível, tamanho, endereço não encontrado, item danificado, outro) e confirme. Ela sai da fila e fica registrada como recusada (não aparece mais, mas o histórico fica salvo no banco para consulta futura, se precisar).
+
+### Se você já rodou o `schema.sql` antes
+
+Não precisa rodar tudo de novo. Só rode o arquivo **`supabase/migration_002_submissions.sql`** no SQL Editor do Supabase (mesmo processo: copiar, colar, "Run") — ele adiciona só o que é novo, sem mexer no que já existe.
+
+### Memória automática para o entregador
+
+Quando o mesmo entregador cadastra várias encomendas seguidas (ex.: 30 pacotes da mesma transportadora em um dia), o formulário lembra automaticamente do **nome dele, CPF e transportadora** a partir da segunda encomenda em diante — só precisa preencher o que muda a cada pacote (destinatário, rua, rastreio). Essa memória fica salva no navegador/celular de quem está preenchendo (não no banco de dados), então cada entregador tem a própria memória, sem misturar com a de outros.

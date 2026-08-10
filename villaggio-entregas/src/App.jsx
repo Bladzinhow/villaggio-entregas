@@ -2,10 +2,17 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import CourierSubmit from "./pages/CourierSubmit";
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = ainda carregando
   const [profile, setProfile] = useState(null);
+
+  // Rota pública: /nova é a tela do entregador, sem exigir login.
+  // (rota simples por caminho, sem precisar de uma biblioteca de rotas)
+  if (window.location.pathname === "/nova") {
+    return <CourierSubmit />;
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

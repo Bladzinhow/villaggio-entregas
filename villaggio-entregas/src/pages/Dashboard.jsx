@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import PackageCard from "../components/PackageCard";
 import NewPackageModal from "../components/NewPackageModal";
+import SubmissionCard from "../components/SubmissionCard";
 import { exportPackagesToExcel } from "../utils";
 
 export default function Dashboard({ profile, onLogout }) {
   const [packages, setPackages] = useState([]);
   const [residents, setResidents] = useState([]);
-  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos
+  const [submissions, setSubmissions] = useState([]);
+  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia
   const [showNewModal, setShowNewModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -17,13 +19,61 @@ export default function Dashboard({ profile, onLogout }) {
 
   async function loadData() {
     setLoading(true);
-    const [{ data: pkgs }, { data: res }] = await Promise.all([
+    const [{ data: pkgs }, { data: res }, { data: subs }] = await Promise.all([
       supabase.from("packages").select("*").order("received_at", { ascending: false }).limit(300),
       supabase.from("residents").select("*").order("street"),
+      supabase
+        .from("submissions")
+        .select("*")
+        .eq("status", "pendente")
+        .order("created_at", { ascending: false })
+        .limit(200),
     ]);
     setPackages(pkgs || []);
     setResidents(res || []);
+    setSubmissions(subs || []);
     setLoading(false);
+  }
+
+  async function acceptSubmission(submission) {
+    // 1) cria a encomenda de verdade a partir do que o entregador enviou
+    const { error: insertError } = await supabase.from("packages").insert({
+      recipient_name: submission.recipient_name,
+      street: submission.street,
+      house_number: submission.house_number,
+      carrier: submission.carrier,
+      tracking_code: submission.tracking_code,
+      description: submission.description,
+      courier_name: submission.courier_name,
+      courier_cpf: submission.courier_cpf,
+      received_by: profile?.id,
+      status: "pendente",
+      submission_id: submission.id,
+    });
+    if (insertError) return;
+
+    // 2) marca a submissão como aceita
+    await supabase
+      .from("submissions")
+      .update({ status: "aceito", reviewed_by: profile?.id, reviewed_at: new Date().toISOString() })
+      .eq("id", submission.id);
+
+    setSubmissions((prev) => prev.filter((s) => s.id !== submission.id));
+    loadData();
+  }
+
+  async function rejectSubmission(submission, reason) {
+    await supabase
+      .from("submissions")
+      .update({
+        status: "recusado",
+        rejection_reason: reason,
+        reviewed_by: profile?.id,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", submission.id);
+
+    setSubmissions((prev) => prev.filter((s) => s.id !== submission.id));
   }
 
   async function confirmDelivery(pkg) {
@@ -110,6 +160,16 @@ export default function Dashboard({ profile, onLogout }) {
           >
             Exportar Excel
           </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              const link = `${window.location.origin}/nova`;
+              navigator.clipboard?.writeText(link);
+              alert(`Link copiado!\n\n${link}\n\nUse este link para gerar o QR code (ex.: em qr-code-generator.com) e fixar na guarita.`);
+            }}
+          >
+            Link do entregador
+          </button>
         </div>
 
         <div className="tabs">
@@ -117,6 +177,7 @@ export default function Dashboard({ profile, onLogout }) {
             ["pendente", "Pendentes"],
             ["entregue", "Entregues"],
             ["todos", "Todos"],
+            ["conferencia", `Conferência${submissions.length ? ` (${submissions.length})` : ""}`],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -128,7 +189,29 @@ export default function Dashboard({ profile, onLogout }) {
           ))}
         </div>
 
-        {loading ? (
+        {filter === "conferencia" ? (
+          loading ? (
+            <p className="text-muted">Carregando...</p>
+          ) : submissions.length === 0 ? (
+            <div className="empty-state">
+              <div className="display">Nada para conferir</div>
+              <p className="text-muted">
+                Quando um entregador cadastrar uma encomenda pelo link público, ela aparece aqui.
+              </p>
+            </div>
+          ) : (
+            <div className="package-list">
+              {submissions.map((s) => (
+                <SubmissionCard
+                  key={s.id}
+                  submission={s}
+                  onAccept={acceptSubmission}
+                  onReject={rejectSubmission}
+                />
+              ))}
+            </div>
+          )
+        ) : loading ? (
           <p className="text-muted">Carregando...</p>
         ) : filtered.length === 0 ? (
           <div className="empty-state">

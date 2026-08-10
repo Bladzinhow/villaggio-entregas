@@ -84,6 +84,34 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
+-- ------------------------------------------------------------
+-- Tabela: submissions (cadastro feito pelo próprio entregador)
+-- Fica pendente até um porteiro conferir e aceitar/recusar.
+-- ------------------------------------------------------------
+create table submissions (
+  id uuid primary key default gen_random_uuid(),
+  recipient_name text not null,
+  street text not null,
+  house_number text,
+  carrier text not null default 'Outro'
+    check (carrier in ('Shopee','Mercado Livre','Amazon','Correios','Transportadora','Outro')),
+  tracking_code text,
+  description text,
+  courier_name text,
+  courier_cpf text,
+  courier_phone text,
+  status text not null default 'pendente' check (status in ('pendente','aceito','recusado')),
+  rejection_reason text,
+  reviewed_by uuid references profiles(id),
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index submissions_status_idx on submissions (status);
+
+-- Liga uma encomenda aceita de volta à submissão de origem (rastreabilidade)
+alter table packages add column submission_id uuid references submissions(id);
+
 -- ============================================================
 -- SEGURANÇA (Row Level Security)
 -- Isto é o que faltou no app anterior: aqui, só quem está
@@ -122,3 +150,22 @@ create policy "packages: exclusao para autenticados"
 
 -- Nenhuma policy "to anon" (visitante sem login) foi criada de propósito:
 -- isso significa que, por padrão, ninguém sem login consegue ler nada.
+
+-- ------------------------------------------------------------
+-- submissions: caso especial.
+-- O entregador (sem login, "anon") pode CRIAR um registro, mas
+-- nunca ler/ver nada — nem o que ele mesmo enviou, nem de outros.
+-- Só o porteiro logado consegue ver e revisar a fila.
+-- ------------------------------------------------------------
+alter table submissions enable row level security;
+
+create policy "submissions: qualquer um pode enviar"
+  on submissions for insert
+  to anon, authenticated
+  with check (status = 'pendente'); -- não pode chegar já "aceito"
+
+create policy "submissions: leitura para autenticados"
+  on submissions for select to authenticated using (true);
+
+create policy "submissions: atualizacao para autenticados"
+  on submissions for update to authenticated using (true);
