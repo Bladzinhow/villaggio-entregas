@@ -3,15 +3,19 @@ import { supabase } from "../supabaseClient";
 import PackageCard from "../components/PackageCard";
 import NewPackageModal from "../components/NewPackageModal";
 import SubmissionCard from "../components/SubmissionCard";
+import ResidentModal from "../components/ResidentModal";
 import { exportPackagesToExcel, findDuplicateTracking, daysSince, AGING_THRESHOLD_DAYS } from "../utils";
 
 export default function Dashboard({ profile, onLogout }) {
   const [packages, setPackages] = useState([]);
   const [residents, setResidents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
-  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia
+  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia | moradores
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingPackage, setEditingPackage] = useState(null);
+  const [showResidentModal, setShowResidentModal] = useState(false);
+  const [editingResident, setEditingResident] = useState(null);
+  const [residentSearch, setResidentSearch] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -126,6 +130,25 @@ export default function Dashboard({ profile, onLogout }) {
     }
   }
 
+  async function deleteResident(resident) {
+    if (!window.confirm(`Remover ${resident.full_name} da lista de moradores?`)) return;
+    const { error } = await supabase.from("residents").delete().eq("id", resident.id);
+    if (!error) {
+      setResidents((prev) => prev.filter((r) => r.id !== resident.id));
+    }
+  }
+
+  const filteredResidents = useMemo(() => {
+    const term = residentSearch.trim().toLowerCase();
+    if (!term) return residents;
+    return residents.filter(
+      (r) =>
+        r.full_name?.toLowerCase().includes(term) ||
+        r.street?.toLowerCase().includes(term) ||
+        r.house_number?.toLowerCase().includes(term)
+    );
+  }, [residents, residentSearch]);
+
   function findResidentPhone(pkg) {
     const match = residents.find(
       (r) =>
@@ -207,35 +230,54 @@ export default function Dashboard({ profile, onLogout }) {
           </div>
         </div>
 
-        <div className="field" style={{ marginBottom: 16 }}>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome, rua ou código de rastreio..."
-          />
-        </div>
+        {filter === "moradores" ? (
+          <>
+            <div className="field" style={{ marginBottom: 16 }}>
+              <input
+                value={residentSearch}
+                onChange={(e) => setResidentSearch(e.target.value)}
+                placeholder="Buscar morador por nome, rua ou número..."
+              />
+            </div>
+            <div className="action-bar">
+              <button className="btn btn-primary" onClick={() => setShowResidentModal(true)}>
+                + Novo morador
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="field" style={{ marginBottom: 16 }}>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome, rua ou código de rastreio..."
+              />
+            </div>
 
-        <div className="action-bar">
-          <button className="btn btn-primary" onClick={() => setShowNewModal(true)}>
-            + Nova encomenda
-          </button>
-          <button
-            className="btn btn-ghost"
-            onClick={() => exportPackagesToExcel(filtered, `entregas-${filter}.xlsx`)}
-          >
-            Exportar Excel
-          </button>
-          <button
-            className="btn btn-ghost"
-            onClick={() => {
-              const link = `${window.location.origin}/nova`;
-              navigator.clipboard?.writeText(link);
-              alert(`Link copiado!\n\n${link}\n\nUse este link para gerar o QR code (ex.: em qr-code-generator.com) e fixar na guarita.`);
-            }}
-          >
-            Link do entregador
-          </button>
-        </div>
+            <div className="action-bar">
+              <button className="btn btn-primary" onClick={() => setShowNewModal(true)}>
+                + Nova encomenda
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => exportPackagesToExcel(filtered, `entregas-${filter}.xlsx`)}
+              >
+                Exportar Excel
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  const link = `${window.location.origin}/nova`;
+                  navigator.clipboard?.writeText(link);
+                  alert(`Link copiado!\n\n${link}\n\nUse este link para gerar o QR code (ex.: em qr-code-generator.com) e fixar na guarita.`);
+                }}
+              >
+                Link do entregador
+              </button>
+            </div>
+          </>
+        )}
 
         <div className="tabs">
           {[
@@ -243,6 +285,7 @@ export default function Dashboard({ profile, onLogout }) {
             ["entregue", "Entregues"],
             ["todos", "Todos"],
             ["conferencia", `Conferência${submissions.length ? ` (${submissions.length})` : ""}`],
+            ["moradores", `Moradores (${residents.length})`],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -254,7 +297,43 @@ export default function Dashboard({ profile, onLogout }) {
           ))}
         </div>
 
-        {filter === "conferencia" ? (
+        {filter === "moradores" ? (
+          loading ? (
+            <p className="text-muted">Carregando...</p>
+          ) : filteredResidents.length === 0 ? (
+            <div className="empty-state">
+              <div className="display">Nenhum morador cadastrado</div>
+              <p className="text-muted">Cadastre moradores para habilitar o aviso automático por WhatsApp.</p>
+            </div>
+          ) : (
+            <div className="package-list">
+              {filteredResidents.map((r) => (
+                <div key={r.id} className="package-card">
+                  <div className="package-top">
+                    <div>
+                      <div className="package-recipient">{r.full_name}</div>
+                      <div className="package-address">
+                        {r.street}{r.house_number ? `, ${r.house_number}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="package-meta">
+                    <span>{r.phone ? `Tel: ${r.phone}` : "Sem telefone cadastrado"}</span>
+                  </div>
+                  {r.notes && <div className="package-desc">{r.notes}</div>}
+                  <div className="package-actions">
+                    <button className="btn btn-ghost btn-sm" onClick={() => setEditingResident(r)}>
+                      Editar
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => deleteResident(r)}>
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : filter === "conferencia" ? (
           loading ? (
             <p className="text-muted">Carregando...</p>
           ) : submissions.length === 0 ? (
@@ -324,6 +403,26 @@ export default function Dashboard({ profile, onLogout }) {
           onClose={() => setEditingPackage(null)}
           onCreated={() => {
             setEditingPackage(null);
+            loadData();
+          }}
+        />
+      )}
+      {showResidentModal && (
+        <ResidentModal
+          onClose={() => setShowResidentModal(false)}
+          onSaved={() => {
+            setShowResidentModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {editingResident && (
+        <ResidentModal
+          editingResident={editingResident}
+          onClose={() => setEditingResident(null)}
+          onSaved={() => {
+            setEditingResident(null);
             loadData();
           }}
         />

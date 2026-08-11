@@ -195,3 +195,20 @@ Isso já está incluído no `migration_all_in_one.sql` (ou, separadamente, em `m
 **Importante:** a proteção real está no banco de dados (a regra recusa o cadastro fora do horário mesmo que alguém tente contornar a tela). A mensagem "Fora do horário de atendimento" que aparece na tela é só para ser educado com quem tentar de boa-fé — a segurança de verdade não depende dela.
 
 Se precisar mudar esses horários no futuro, me avise — é uma alteração pequena e rápida.
+
+---
+
+## Parte 9 — Cadastro de moradores pelo próprio app
+
+Não precisa de nenhuma migração nova no banco — as permissões já existiam desde o início.
+
+### O que foi adicionado
+
+- Nova aba **"Moradores"** no painel, com contador de quantos já estão cadastrados.
+- Busca por nome, rua ou número.
+- Botão **"+ Novo morador"** — cadastra nome, rua, número, telefone e observações.
+- Botões **"Editar"** e **"Remover"** em cada morador da lista.
+
+Não é mais necessário usar o Table Editor do Supabase para isso no dia a dia — só use se precisar importar vários de uma vez via CSV (como fizemos com a planilha do Group Software).
+
+**Lembrete:** a rua e o número do morador precisam bater exatamente com o que é digitado no cadastro das encomendas para o botão de WhatsApp aparecer.
