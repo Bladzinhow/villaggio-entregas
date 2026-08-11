@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
+import { uploadPackagePhoto, isWithinBusinessHours, BUSINESS_HOURS_LABEL } from "../utils";
 
 const CARRIERS = ["Shopee", "Mercado Livre", "Amazon", "Correios", "Transportadora", "Outro"];
 
@@ -41,9 +42,12 @@ const emptyForm = () => ({
 
 export default function CourierSubmit() {
   const [form, setForm] = useState(emptyForm());
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [justSent, setJustSent] = useState(false);
+  const [withinHours, setWithinHours] = useState(isWithinBusinessHours());
 
   // Ao abrir a página, pré-preenche com os últimos dados "repetíveis" salvos neste aparelho
   useEffect(() => {
@@ -51,14 +55,30 @@ export default function CourierSubmit() {
     setForm((f) => ({ ...f, ...remembered }));
   }, []);
 
+  // Reavalia o horário periodicamente, caso a pessoa deixe a tela aberta
+  // e o horário mude enquanto isso (ex.: passou das 18h).
+  useEffect(() => {
+    const interval = setInterval(() => setWithinHours(isWithinBusinessHours()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  function handlePhotoChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
     setSaving(true);
+
+    const photo_url = photoFile ? await uploadPackagePhoto(photoFile) : null;
 
     const { error } = await supabase.from("submissions").insert({
       recipient_name: form.recipient_name,
@@ -70,13 +90,18 @@ export default function CourierSubmit() {
       courier_name: form.courier_name || null,
       courier_cpf: form.courier_cpf || null,
       courier_phone: form.courier_phone || null,
+      photo_url,
       status: "pendente",
     });
 
     setSaving(false);
 
     if (error) {
-      setError("Não foi possível enviar. Verifique a internet e tente novamente.");
+      if (!isWithinBusinessHours()) {
+        setWithinHours(false);
+      } else {
+        setError("Não foi possível enviar. Verifique a internet e tente novamente.");
+      }
       return;
     }
 
@@ -95,7 +120,29 @@ export default function CourierSubmit() {
     // Começa a próxima encomenda: limpa só o que muda pacote a pacote
     const remembered = loadRemembered();
     setForm({ ...emptyForm(), ...remembered });
+    setPhotoFile(null);
+    setPhotoPreview(null);
     setJustSent(false);
+  }
+
+  if (!withinHours) {
+    return (
+      <div className="login-shell">
+        <div className="login-card" style={{ textAlign: "center" }}>
+          <div className="login-mark" style={{ background: "var(--ink-soft)" }}>⏰</div>
+          <h1>Fora do horário de atendimento</h1>
+          <p className="login-sub">
+            O cadastro de encomendas fica disponível apenas em horário útil.
+          </p>
+          <div className="package-desc" style={{ display: "block", marginTop: 6 }}>
+            {BUSINESS_HOURS_LABEL}
+          </div>
+          <p className="text-muted" style={{ marginTop: 16 }}>
+            Volte dentro desse horário, ou fale com a portaria diretamente.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   if (justSent) {
@@ -172,6 +219,28 @@ export default function CourierSubmit() {
               onChange={(e) => update("description", e.target.value)}
               placeholder="Ex.: Caixa pequena"
             />
+          </div>
+
+          <div className="field">
+            <label>Foto da encomenda (opcional, recomendado)</label>
+            {photoPreview ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <img
+                  src={photoPreview}
+                  alt="Prévia da foto"
+                  style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1.5px solid var(--stone-dark)" }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+                >
+                  Remover
+                </button>
+              </div>
+            ) : (
+              <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} />
+            )}
           </div>
 
           <hr style={{ border: "none", borderTop: "1px solid var(--stone-dark)", margin: "16px 0" }} />

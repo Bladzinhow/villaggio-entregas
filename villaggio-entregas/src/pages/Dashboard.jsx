@@ -3,7 +3,7 @@ import { supabase } from "../supabaseClient";
 import PackageCard from "../components/PackageCard";
 import NewPackageModal from "../components/NewPackageModal";
 import SubmissionCard from "../components/SubmissionCard";
-import { exportPackagesToExcel } from "../utils";
+import { exportPackagesToExcel, findDuplicateTracking, daysSince, AGING_THRESHOLD_DAYS } from "../utils";
 
 export default function Dashboard({ profile, onLogout }) {
   const [packages, setPackages] = useState([]);
@@ -11,6 +11,8 @@ export default function Dashboard({ profile, onLogout }) {
   const [submissions, setSubmissions] = useState([]);
   const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia
   const [showNewModal, setShowNewModal] = useState(false);
+  const [editingPackage, setEditingPackage] = useState(null);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -36,6 +38,16 @@ export default function Dashboard({ profile, onLogout }) {
   }
 
   async function acceptSubmission(submission) {
+    // Verifica duplicidade de código de rastreio antes de aceitar
+    const existing = await findDuplicateTracking(submission.tracking_code);
+    if (existing) {
+      const confirmMsg =
+        `Já existe uma encomenda com esse código de rastreio:\n` +
+        `${existing.recipient_name} — ${existing.street}${existing.house_number ? ", " + existing.house_number : ""} (status: ${existing.status})\n\n` +
+        `Aceitar mesmo assim?`;
+      if (!window.confirm(confirmMsg)) return;
+    }
+
     // 1) cria a encomenda de verdade a partir do que o entregador enviou
     const { error: insertError } = await supabase.from("packages").insert({
       recipient_name: submission.recipient_name,
@@ -49,6 +61,7 @@ export default function Dashboard({ profile, onLogout }) {
       received_by: profile?.id,
       status: "pendente",
       submission_id: submission.id,
+      photo_url: submission.photo_url || null,
     });
     if (insertError) return;
 
@@ -76,14 +89,39 @@ export default function Dashboard({ profile, onLogout }) {
     setSubmissions((prev) => prev.filter((s) => s.id !== submission.id));
   }
 
-  async function confirmDelivery(pkg) {
+  async function confirmDelivery(pkg, pickedUpBy) {
+    const delivered_at = new Date().toISOString();
     const { error } = await supabase
       .from("packages")
-      .update({ status: "entregue", delivered_at: new Date().toISOString() })
+      .update({ status: "entregue", delivered_at, picked_up_by: pickedUpBy || null })
       .eq("id", pkg.id);
     if (!error) {
       setPackages((prev) =>
-        prev.map((p) => (p.id === pkg.id ? { ...p, status: "entregue", delivered_at: new Date().toISOString() } : p))
+        prev.map((p) =>
+          p.id === pkg.id ? { ...p, status: "entregue", delivered_at, picked_up_by: pickedUpBy || null } : p
+        )
+      );
+    }
+  }
+
+  async function registerOccurrence(pkg, occurrenceType, note) {
+    const occurrence_at = new Date().toISOString();
+    const { error } = await supabase
+      .from("packages")
+      .update({
+        occurrence_type: occurrenceType,
+        occurrence_note: note || null,
+        occurrence_at,
+        occurrence_by: profile?.id,
+      })
+      .eq("id", pkg.id);
+    if (!error) {
+      setPackages((prev) =>
+        prev.map((p) =>
+          p.id === pkg.id
+            ? { ...p, occurrence_type: occurrenceType, occurrence_note: note || null, occurrence_at }
+            : p
+        )
       );
     }
   }
@@ -100,13 +138,26 @@ export default function Dashboard({ profile, onLogout }) {
   const counts = useMemo(() => {
     const pendentes = packages.filter((p) => p.status === "pendente").length;
     const entregues = packages.filter((p) => p.status === "entregue").length;
-    return { pendentes, entregues, total: packages.length };
+    const paradas = packages.filter(
+      (p) => p.status === "pendente" && daysSince(p.received_at) >= AGING_THRESHOLD_DAYS
+    ).length;
+    return { pendentes, entregues, total: packages.length, paradas };
   }, [packages]);
 
   const filtered = useMemo(() => {
-    if (filter === "todos") return packages;
-    return packages.filter((p) => p.status === filter);
-  }, [packages, filter]);
+    let list = filter === "todos" || filter === "conferencia" ? packages : packages.filter((p) => p.status === filter);
+
+    const term = search.trim().toLowerCase();
+    if (term) {
+      list = list.filter(
+        (p) =>
+          p.recipient_name?.toLowerCase().includes(term) ||
+          p.street?.toLowerCase().includes(term) ||
+          p.tracking_code?.toLowerCase().includes(term)
+      );
+    }
+    return list;
+  }, [packages, filter, search]);
 
   const groupedByStreet = useMemo(() => {
     const groups = {};
@@ -135,7 +186,7 @@ export default function Dashboard({ profile, onLogout }) {
       </div>
 
       <div className="main">
-        <div className="stats-row">
+        <div className="stats-row stats-row-4">
           <div className="stat-card pending">
             <div className="stat-number">{counts.pendentes}</div>
             <div className="stat-label">Pendentes</div>
@@ -148,6 +199,20 @@ export default function Dashboard({ profile, onLogout }) {
             <div className="stat-number">{counts.total}</div>
             <div className="stat-label">Total</div>
           </div>
+          <div className="stat-card" style={counts.paradas > 0 ? { background: "#FBEAE8" } : {}}>
+            <div className="stat-number" style={{ color: counts.paradas > 0 ? "#A6423A" : undefined }}>
+              {counts.paradas}
+            </div>
+            <div className="stat-label">Atenção (7+ dias)</div>
+          </div>
+        </div>
+
+        <div className="field" style={{ marginBottom: 16 }}>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome, rua ou código de rastreio..."
+          />
         </div>
 
         <div className="action-bar">
@@ -231,6 +296,8 @@ export default function Dashboard({ profile, onLogout }) {
                     pkg={pkg}
                     residentPhone={findResidentPhone(pkg)}
                     onConfirmDelivery={confirmDelivery}
+                    onEdit={setEditingPackage}
+                    onRegisterOccurrence={registerOccurrence}
                   />
                 ))}
               </div>
@@ -245,6 +312,18 @@ export default function Dashboard({ profile, onLogout }) {
           onClose={() => setShowNewModal(false)}
           onCreated={() => {
             setShowNewModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {editingPackage && (
+        <NewPackageModal
+          profileId={profile?.id}
+          editingPackage={editingPackage}
+          onClose={() => setEditingPackage(null)}
+          onCreated={() => {
+            setEditingPackage(null);
             loadData();
           }}
         />

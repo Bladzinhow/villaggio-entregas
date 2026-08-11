@@ -1,5 +1,7 @@
 # Villaggio Paradiso — Controle de Entregas
 
+> **Atalho para amanhã:** se você ainda não rodou nenhuma das migrações 002-005, use o arquivo **`supabase/migration_all_in_one.sql`** — ele já tem tudo junto, é só rodar uma vez só no SQL Editor do Supabase. As instruções detalhadas de cada parte continuam abaixo, caso precise entender o que cada uma faz.
+
 App próprio, construído do zero, para substituir o antigo (que rodava no Base44).
 Sem mensalidade — usa apenas os planos gratuitos do Supabase e da Vercel.
 
@@ -131,6 +133,65 @@ O entregador abre esse link (pelo próprio celular, via QR code, ou num tablet f
 
 Não precisa rodar tudo de novo. Só rode o arquivo **`supabase/migration_002_submissions.sql`** no SQL Editor do Supabase (mesmo processo: copiar, colar, "Run") — ele adiciona só o que é novo, sem mexer no que já existe.
 
+---
+
+## Parte 5 — Correções de risco (após revalidação do processo)
+
+### Se você já rodou as migrações anteriores
+
+Rode só o arquivo **`supabase/migration_003_pickup_name.sql`** no SQL Editor (mesmo processo de sempre).
+
+### O que mudou
+
+1. **Confirmação de identidade na retirada.** Ao clicar em "Confirmar entrega", agora aparece um campo para anotar o nome de quem está retirando a encomenda antes de confirmar. É opcional (não trava o uso), mas recomendado — fica registrado no histórico e no Excel.
+2. **Alerta de código de rastreio duplicado.** Se você (ou o entregador, na Conferência) tentar cadastrar uma encomenda com um código de rastreio que já existe no sistema, aparece um aviso mostrando a encomenda existente, e é preciso confirmar explicitamente antes de continuar — evita duplicidade por engano.
+
 ### Memória automática para o entregador
 
 Quando o mesmo entregador cadastra várias encomendas seguidas (ex.: 30 pacotes da mesma transportadora em um dia), o formulário lembra automaticamente do **nome dele, CPF e transportadora** a partir da segunda encomenda em diante — só precisa preencher o que muda a cada pacote (destinatário, rua, rastreio). Essa memória fica salva no navegador/celular de quem está preenchendo (não no banco de dados), então cada entregador tem a própria memória, sem misturar com a de outros.
+
+---
+
+## Parte 6 — Editar, buscar, atraso e ocorrências
+
+### Se você já rodou as migrações anteriores
+
+Rode só o arquivo **`supabase/migration_004_occurrences.sql`** no SQL Editor (mesmo processo de sempre).
+
+### O que foi adicionado
+
+1. **Editar encomenda.** Cada encomenda agora tem um botão "Editar" — corrige qualquer campo digitado errado, sem precisar recadastrar.
+2. **Busca.** Um campo de busca acima da lista filtra por nome do destinatário, rua ou código de rastreio, dentro da aba selecionada.
+3. **Alerta de encomenda parada.** Um quarto contador, "Atenção (7+ dias)", mostra quantas encomendas pendentes estão há uma semana ou mais na portaria. Cada uma dessas também ganha um selo vermelho "Parada há X dias" no card. O limite de 7 dias está no código (`AGING_THRESHOLD_DAYS` em `src/utils.js`) e pode ser ajustado se quiser um prazo diferente.
+4. **Registro de ocorrências.** Botão "Registrar ocorrência" em cada encomenda (avaria, extravio ou outro, com um campo de detalhe). Uma vez registrada, ela aparece destacada em vermelho no card e entra no relatório Excel.
+
+---
+
+## Parte 7 — Fotos das encomendas (prova de recebimento)
+
+### Se você já rodou as migrações anteriores
+
+Rode só o arquivo **`supabase/migration_005_photos.sql`** no SQL Editor. Essa migração também cria o "espaço de armazenamento" (bucket) das fotos dentro do Supabase — não precisa criar nada manualmente antes.
+
+### O que foi adicionado
+
+- Tanto no cadastro manual quanto na tela do entregador (`/nova`), agora existe um campo **"Foto da encomenda"**, opcional. Em celular, ele já abre direto a câmera (`capture="environment"`).
+- A foto aparece como miniatura no card da encomenda (inclusive na Conferência, antes de aceitar) — clicando nela, abre em tamanho grande em uma nova aba.
+- Se o entregador tirar a foto lá no cadastro dele e o porteiro aceitar na Conferência, a mesma foto já vem junto para a encomenda — não precisa tirar de novo.
+- Se o upload da foto falhar por qualquer motivo (sem sinal, por exemplo), o cadastro da encomenda continua funcionando normalmente, só sem a foto — isso nunca trava o registro.
+- Tamanho máximo por foto: 5 MB (mais que suficiente para fotos de celular comprimidas).
+
+---
+
+## Parte 8 — Horário de atendimento do entregador
+
+O cadastro pelo link `/nova` agora só funciona em horário útil:
+- Segunda a sexta: 7h às 18h
+- Sábado: 7h às 14h
+- Domingo: fechado
+
+Isso já está incluído no `migration_all_in_one.sql` (ou, separadamente, em `migration_006_business_hours.sql`).
+
+**Importante:** a proteção real está no banco de dados (a regra recusa o cadastro fora do horário mesmo que alguém tente contornar a tela). A mensagem "Fora do horário de atendimento" que aparece na tela é só para ser educado com quem tentar de boa-fé — a segurança de verdade não depende dela.
+
+Se precisar mudar esses horários no futuro, me avise — é uma alteração pequena e rápida.

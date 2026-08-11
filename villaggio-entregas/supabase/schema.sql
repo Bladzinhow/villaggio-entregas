@@ -55,6 +55,11 @@ create table packages (
   delivered_at timestamptz,
   delivered_note text,
   whatsapp_notified boolean not null default false,
+  picked_up_by text,
+  occurrence_type text check (occurrence_type in ('avaria', 'extravio', 'outro')),
+  occurrence_note text,
+  occurrence_at timestamptz,
+  occurrence_by uuid references profiles(id),
   created_at timestamptz not null default now()
 );
 

@@ -41,6 +41,16 @@ export default function SubmissionCard({ submission, onAccept, onReject }) {
         <div className="package-desc">{submission.description}</div>
       )}
 
+      {submission.photo_url && (
+        <a href={submission.photo_url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 8 }}>
+          <img
+            src={submission.photo_url}
+            alt="Foto da encomenda"
+            style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "1.5px solid var(--stone-dark)" }}
+          />
+        </a>
+      )}
+
       <div className="package-meta">
         {submission.courier_name && (
           <span>
