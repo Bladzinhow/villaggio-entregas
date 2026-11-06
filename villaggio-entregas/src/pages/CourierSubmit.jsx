@@ -47,6 +47,7 @@ export default function CourierSubmit() {
   const [step, setStep] = useState("photo"); // "photo" | "form"
   const [readingPhoto, setReadingPhoto] = useState(false);
   const captureInputRef = useRef(null);
+  const readAttemptRef = useRef(0); // identifica cada leitura, pra ignorar resultado de uma leitura já abandonada
 
   const [form, setForm] = useState(emptyForm());
   const [photoFile, setPhotoFile] = useState(null);
@@ -85,6 +86,8 @@ export default function CourierSubmit() {
     e.target.value = "";
     if (!file) return;
 
+    const myAttempt = ++readAttemptRef.current; // marca esta leitura como "a atual"
+
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setReadingPhoto(true);
@@ -92,26 +95,35 @@ export default function CourierSubmit() {
     const filled = {};
     try {
       const freeResult = await runFreeOcr(file);
+      if (readAttemptRef.current !== myAttempt) return; // já saiu dessa leitura — ignora
       applyResult(freeResult, filled);
     } catch {
       // segue sem travar — formulário fica pronto pra preencher à mão
     }
+    if (readAttemptRef.current !== myAttempt) return;
 
     if (aiScanEnabled) {
       try {
         const aiResult = await scanLabelWithAI(file);
+        if (readAttemptRef.current !== myAttempt) return;
         applyResult(aiResult, filled);
       } catch {
-        // IA falhou/não configurada — já temos o que o OCR grátis conseguiu
+        // IA falhou/não configurada/demorou demais — já temos o que o OCR grátis conseguiu
       }
     }
+    if (readAttemptRef.current !== myAttempt) return;
 
     setAiFilledFields(filled);
     setReadingPhoto(false);
     setStep("form");
   }
 
+  // Sempre funciona, mesmo no meio de uma leitura em andamento: cancela
+  // qualquer leitura pendente e manda direto pro formulário, para nunca
+  // prender a pessoa numa tela de carregamento.
   function skipPhotoStep() {
+    readAttemptRef.current++;
+    setReadingPhoto(false);
     setStep("form");
   }
 
@@ -272,8 +284,8 @@ export default function CourierSubmit() {
             )}
           </div>
 
-          <button className="btn btn-ghost full-width" onClick={skipPhotoStep} disabled={readingPhoto}>
-            Preencher manualmente, sem foto
+          <button className="btn btn-ghost full-width" onClick={skipPhotoStep}>
+            {readingPhoto ? "Demorando? Continuar sem esperar" : "Preencher manualmente, sem foto"}
           </button>
         </div>
       </div>

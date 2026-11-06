@@ -83,9 +83,15 @@ export function buildPickupLink(token) {
 export async function scanLabelWithAI(file) {
   const { base64, mediaType } = await fileToBase64(file);
 
-  const { data, error } = await supabase.functions.invoke("scan-label", {
+  // Nunca espera para sempre: se a conexão travar, desiste depois de 20s
+  // em vez de prender a pessoa na tela de carregamento.
+  const invokePromise = supabase.functions.invoke("scan-label", {
     body: { imageBase64: base64, mediaType },
   });
+  const timeoutPromise = new Promise((resolve) =>
+    setTimeout(() => resolve({ data: null, error: { message: "timeout" } }), 20000)
+  );
+  const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
 
   if (error) throw new Error("Não foi possível conectar ao leitor de IA. Tente novamente.");
   if (!data?.ok) {

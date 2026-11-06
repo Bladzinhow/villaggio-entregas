@@ -27,6 +27,7 @@ export default function NewPackageModal({ onClose, onCreated, profileId, editing
   const [step, setStep] = useState(isEditing ? "form" : "photo");
   const [readingPhoto, setReadingPhoto] = useState(false);
   const captureInputRef = useRef(null);
+  const readAttemptRef = useRef(0); // identifica cada leitura, pra ignorar resultado de uma leitura já abandonada
 
   const [form, setForm] = useState(
     isEditing
@@ -83,6 +84,8 @@ export default function NewPackageModal({ onClose, onCreated, profileId, editing
     e.target.value = "";
     if (!file) return;
 
+    const myAttempt = ++readAttemptRef.current; // marca esta leitura como "a atual"
+
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setReadingPhoto(true);
@@ -90,26 +93,36 @@ export default function NewPackageModal({ onClose, onCreated, profileId, editing
     const filled = {};
     try {
       const freeResult = await runFreeOcr(file);
+      if (readAttemptRef.current !== myAttempt) return; // usuário já saiu dessa leitura — ignora
       applyResult(freeResult, filled);
     } catch {
-      // leitura grátis falhou — segue sem travar, o formulário fica em branco pra corrigir
+      // leitura grátis falhou ou demorou demais — segue sem travar
     }
+    if (readAttemptRef.current !== myAttempt) return;
 
     if (aiScanEnabled) {
       try {
         const aiResult = await scanLabelWithAI(file);
+        if (readAttemptRef.current !== myAttempt) return;
         applyResult(aiResult, filled); // a IA, quando acerta, substitui o palpite do OCR grátis
       } catch {
-        // IA falhou/não configurada — já temos o que o OCR grátis conseguiu
+        // IA falhou/não configurada/demorou demais — já temos o que o OCR grátis conseguiu
       }
     }
+    if (readAttemptRef.current !== myAttempt) return;
 
     setAiFilledFields(filled);
     setReadingPhoto(false);
     setStep("form");
   }
 
+  // Sempre funciona, mesmo no meio de uma leitura em andamento: cancela
+  // qualquer leitura pendente (o resultado dela, se chegar depois, é
+  // ignorado) e manda direto para o formulário, para nunca prender a
+  // pessoa numa tela de carregamento.
   function skipPhotoStep() {
+    readAttemptRef.current++;
+    setReadingPhoto(false);
     setStep("form");
   }
 
@@ -211,8 +224,8 @@ export default function NewPackageModal({ onClose, onCreated, profileId, editing
 
           <div className="modal-footer">
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-            <button type="button" className="btn btn-ghost" onClick={skipPhotoStep} disabled={readingPhoto}>
-              Preencher manualmente, sem foto
+            <button type="button" className="btn btn-ghost" onClick={skipPhotoStep}>
+              {readingPhoto ? "Demorando? Continuar sem esperar" : "Preencher manualmente, sem foto"}
             </button>
           </div>
         </div>

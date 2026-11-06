@@ -1,14 +1,36 @@
 // Leitura de etiqueta gratuita (OCR local, sem custo, sem conta) — lógica
 // compartilhada entre o fluxo "iniciar pela foto" e o botão avulso
 // "🆓 Ler etiqueta (grátis)".
-export async function runFreeOcr(file) {
+//
+// Na primeira vez que roda num aparelho/navegador, o Tesseract baixa um
+// pacote de idioma (~10-15 MB) de um servidor externo. Com internet fraca
+// isso pode demorar muito — por isso tudo aqui tem um limite de tempo, para
+// NUNCA travar a tela esperando para sempre: se estourar o tempo, desiste
+// dessa leitura e deixa a pessoa preencher à mão, sem ficar presa.
+const DEFAULT_TIMEOUT_MS = 20000;
+
+export async function runFreeOcr(file, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  return withTimeout(runFreeOcrInner(file), timeoutMs, "Leitura grátis demorou demais e foi cancelada.");
+}
+
+async function runFreeOcrInner(file) {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("por");
-  const { data } = await worker.recognize(file);
-  await worker.terminate();
+  try {
+    const { data } = await worker.recognize(file);
+    const text = data.text || "";
+    return { tracking_code: guessTrackingCode(text), raw_text: text };
+  } finally {
+    worker.terminate(); // não espera — só pede para encerrar em segundo plano
+  }
+}
 
-  const text = data.text || "";
-  return { tracking_code: guessTrackingCode(text), raw_text: text };
+function withTimeout(promise, ms, timeoutMessage) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // Tenta achar, no texto lido, o trecho que mais parece um código de
