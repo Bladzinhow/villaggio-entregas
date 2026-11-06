@@ -4,14 +4,24 @@ import PackageCard from "../components/PackageCard";
 import NewPackageModal from "../components/NewPackageModal";
 import SubmissionCard from "../components/SubmissionCard";
 import ResidentModal from "../components/ResidentModal";
-import { exportPackagesToExcel, exportSubmissionsToExcel, findDuplicateTracking, daysSince, AGING_THRESHOLD_DAYS } from "../utils";
+import {
+  exportPackagesToExcel,
+  exportSubmissionsToExcel,
+  findDuplicateTracking,
+  daysSince,
+  AGING_THRESHOLD_DAYS,
+  getSettings,
+  notifyArrival,
+} from "../utils";
+import SettingsPanel from "../components/SettingsPanel";
 
 export default function Dashboard({ profile, onLogout }) {
   const [packages, setPackages] = useState([]);
   const [residents, setResidents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [teamProfiles, setTeamProfiles] = useState([]);
-  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia | moradores | equipe
+  const [settings, setSettings] = useState(null);
+  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia | moradores | equipe | configuracoes
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingPackage, setEditingPackage] = useState(null);
   const [showResidentModal, setShowResidentModal] = useState(false);
@@ -27,7 +37,7 @@ export default function Dashboard({ profile, onLogout }) {
 
   async function loadData() {
     setLoading(true);
-    const [{ data: pkgs }, { data: res }, { data: subs }, { data: team }] = await Promise.all([
+    const [{ data: pkgs }, { data: res }, { data: subs }, { data: team }, settingsData] = await Promise.all([
       supabase.from("packages").select("*").order("received_at", { ascending: false }).limit(300),
       supabase.from("residents").select("*").order("street"),
       supabase
@@ -36,13 +46,17 @@ export default function Dashboard({ profile, onLogout }) {
         .order("created_at", { ascending: false })
         .limit(500),
       supabase.from("profiles").select("*").order("created_at"),
+      getSettings(),
     ]);
     setPackages(pkgs || []);
     setResidents(res || []);
     setSubmissions(subs || []);
     setTeamProfiles(team || []);
+    setSettings(settingsData);
     setLoading(false);
   }
+
+  const agingAlertDays = settings?.aging_alert_days || AGING_THRESHOLD_DAYS;
 
   function nameForProfileId(id) {
     if (!id) return null;
@@ -72,21 +86,27 @@ export default function Dashboard({ profile, onLogout }) {
     }
 
     // 1) cria a encomenda de verdade a partir do que o entregador enviou
-    const { error: insertError } = await supabase.from("packages").insert({
-      recipient_name: submission.recipient_name,
-      street: submission.street,
-      house_number: submission.house_number,
-      carrier: submission.carrier,
-      tracking_code: submission.tracking_code,
-      description: submission.description,
-      courier_name: submission.courier_name,
-      courier_cpf: submission.courier_cpf,
-      received_by: profile?.id,
-      status: "pendente",
-      submission_id: submission.id,
-      photo_url: submission.photo_url || null,
-    });
+    const { data: inserted, error: insertError } = await supabase
+      .from("packages")
+      .insert({
+        recipient_name: submission.recipient_name,
+        street: submission.street,
+        house_number: submission.house_number,
+        carrier: submission.carrier,
+        tracking_code: submission.tracking_code,
+        description: submission.description,
+        courier_name: submission.courier_name,
+        courier_cpf: submission.courier_cpf,
+        received_by: profile?.id,
+        status: "pendente",
+        submission_id: submission.id,
+        photo_url: submission.photo_url || null,
+      })
+      .select("id")
+      .single();
     if (insertError) return;
+
+    if (settings?.notify_email_enabled && inserted?.id) notifyArrival(inserted.id);
 
     // 2) marca a submissão como aceita
     const reviewed_at = new Date().toISOString();
@@ -206,10 +226,10 @@ export default function Dashboard({ profile, onLogout }) {
     const pendentes = packages.filter((p) => p.status === "pendente").length;
     const entregues = packages.filter((p) => p.status === "entregue").length;
     const paradas = packages.filter(
-      (p) => p.status === "pendente" && daysSince(p.received_at) >= AGING_THRESHOLD_DAYS
+      (p) => p.status === "pendente" && daysSince(p.received_at) >= agingAlertDays
     ).length;
     return { pendentes, entregues, total: packages.length, paradas };
-  }, [packages]);
+  }, [packages, agingAlertDays]);
 
   const filtered = useMemo(() => {
     let list = filter === "todos" || filter === "conferencia" ? packages : packages.filter((p) => p.status === filter);
@@ -270,11 +290,11 @@ export default function Dashboard({ profile, onLogout }) {
             <div className="stat-number" style={{ color: counts.paradas > 0 ? "#A6423A" : undefined }}>
               {counts.paradas}
             </div>
-            <div className="stat-label">Atenção (7+ dias)</div>
+            <div className="stat-label">Atenção ({agingAlertDays}+ dias)</div>
           </div>
         </div>
 
-        {filter === "equipe" ? null : filter === "moradores" ? (
+        {filter === "equipe" || filter === "configuracoes" ? null : filter === "moradores" ? (
           <>
             <div className="field" style={{ marginBottom: 16 }}>
               <input
@@ -337,6 +357,7 @@ export default function Dashboard({ profile, onLogout }) {
             ["conferencia", `Conferência${pendingSubmissions.length ? ` (${pendingSubmissions.length})` : ""}`],
             ["moradores", `Moradores (${residents.length})`],
             ["equipe", "Equipe"],
+            ["configuracoes", "Configurações"],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -348,7 +369,13 @@ export default function Dashboard({ profile, onLogout }) {
           ))}
         </div>
 
-        {filter === "equipe" ? (
+        {filter === "configuracoes" ? (
+          <SettingsPanel
+            settings={settings}
+            isSindico={isSindico}
+            onSaved={(newSettings) => setSettings(newSettings)}
+          />
+        ) : filter === "equipe" ? (
           loading ? (
             <p className="text-muted">Carregando...</p>
           ) : (
@@ -407,6 +434,7 @@ export default function Dashboard({ profile, onLogout }) {
                   </div>
                   <div className="package-meta">
                     <span>{r.phone ? `Tel: ${r.phone}` : "Sem telefone cadastrado"}</span>
+                    <span>{r.email ? `E-mail: ${r.email}` : "Sem e-mail cadastrado"}</span>
                   </div>
                   {r.notes && <div className="package-desc">{r.notes}</div>}
                   <div className="package-actions">
@@ -491,6 +519,7 @@ export default function Dashboard({ profile, onLogout }) {
                     onEdit={setEditingPackage}
                     onRegisterOccurrence={registerOccurrence}
                     nameForProfileId={nameForProfileId}
+                    agingAlertDays={agingAlertDays}
                   />
                 ))}
               </div>
@@ -502,9 +531,11 @@ export default function Dashboard({ profile, onLogout }) {
       {showNewModal && (
         <NewPackageModal
           profileId={profile?.id}
+          aiScanEnabled={!!settings?.ai_scan_enabled}
           onClose={() => setShowNewModal(false)}
-          onCreated={() => {
+          onCreated={(newId) => {
             setShowNewModal(false);
+            if (settings?.notify_email_enabled && newId) notifyArrival(newId);
             loadData();
           }}
         />
@@ -514,6 +545,7 @@ export default function Dashboard({ profile, onLogout }) {
         <NewPackageModal
           profileId={profile?.id}
           editingPackage={editingPackage}
+          aiScanEnabled={!!settings?.ai_scan_enabled}
           onClose={() => setEditingPackage(null)}
           onCreated={() => {
             setEditingPackage(null);

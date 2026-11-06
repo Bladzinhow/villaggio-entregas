@@ -30,7 +30,86 @@ export function daysSince(dateString) {
   return Math.floor(ms / (1000 * 60 * 60 * 24));
 }
 
+// Mantido só como valor de reserva (ex.: antes das configurações carregarem).
+// O valor que realmente vale é o configurado pelo síndico em app_settings.
 export const AGING_THRESHOLD_DAYS = 7;
+
+// ------------------------------------------------------------
+// Configurações do síndico (app_settings) — linha única na tabela.
+// ------------------------------------------------------------
+const DEFAULT_SETTINGS = {
+  aging_alert_days: 7,
+  aging_expire_days: 30,
+  custom_message: "",
+  notify_email_enabled: false,
+  ai_scan_enabled: false,
+};
+
+export async function getSettings() {
+  const { data, error } = await supabase.from("app_settings").select("*").eq("id", true).single();
+  if (error || !data) return DEFAULT_SETTINGS;
+  return { ...DEFAULT_SETTINGS, ...data };
+}
+
+export async function updateSettings(changes) {
+  const { error } = await supabase.from("app_settings").update(changes).eq("id", true);
+  return !error;
+}
+
+// Dispara o e-mail automático de chegada (se estiver ligado nas
+// configurações). Nunca lança erro — se a função não estiver configurada
+// ou a internet falhar, simplesmente não notifica, sem travar o cadastro.
+export async function notifyArrival(packageId) {
+  try {
+    const { error } = await supabase.functions.invoke("notify-arrival", {
+      body: { packageId },
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export function buildPickupLink(token) {
+  return `${window.location.origin}/retirar?token=${token}`;
+}
+
+// ------------------------------------------------------------
+// Leitura de etiqueta por IA ("Smart Scan").
+// Recebe um arquivo de imagem, chama o Edge Function scan-label e
+// devolve os campos que a IA conseguiu identificar (ou lança erro
+// com uma mensagem amigável para mostrar na tela).
+// ------------------------------------------------------------
+export async function scanLabelWithAI(file) {
+  const { base64, mediaType } = await fileToBase64(file);
+
+  const { data, error } = await supabase.functions.invoke("scan-label", {
+    body: { imageBase64: base64, mediaType },
+  });
+
+  if (error) throw new Error("Não foi possível conectar ao leitor de IA. Tente novamente.");
+  if (!data?.ok) {
+    if (data?.reason === "ai_not_configured") {
+      throw new Error("O leitor por IA ainda não foi configurado pelo síndico.");
+    }
+    throw new Error("Não consegui ler essa etiqueta. Tente outra foto ou preencha manualmente.");
+  }
+  return data.data; // { tracking_code, recipient_name, street, house_number, carrier }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result; // "data:image/jpeg;base64,AAAA..."
+      const [header, base64] = result.split(",");
+      const mediaType = header.match(/data:(.*);base64/)?.[1] || "image/jpeg";
+      resolve({ base64, mediaType });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export const BUSINESS_HOURS_LABEL = "Segunda a sexta, 7h às 18h · Sábado, 7h às 14h";
 

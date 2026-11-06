@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 
-const blankForm = { full_name: "", street: "", house_number: "", phone: "", notes: "" };
+const blankForm = { full_name: "", street: "", house_number: "", phone: "", email: "", notes: "" };
 
 export default function ResidentModal({ onClose, onSaved, editingResident }) {
   const isEditing = !!editingResident;
@@ -12,6 +12,7 @@ export default function ResidentModal({ onClose, onSaved, editingResident }) {
           street: editingResident.street || "",
           house_number: editingResident.house_number || "",
           phone: editingResident.phone || "",
+          email: editingResident.email || "",
           notes: editingResident.notes || "",
         }
       : blankForm
@@ -33,6 +34,7 @@ export default function ResidentModal({ onClose, onSaved, editingResident }) {
       street: form.street,
       house_number: form.house_number || null,
       phone: form.phone || null,
+      email: form.email || null,
       notes: form.notes || null,
     };
 
@@ -90,14 +92,29 @@ export default function ResidentModal({ onClose, onSaved, editingResident }) {
             </div>
           </div>
 
-          <div className="field">
-            <label>Telefone (WhatsApp)</label>
-            <input
-              value={form.phone}
-              onChange={(e) => update("phone", e.target.value)}
-              placeholder="Ex.: 11987654321 (com DDD)"
-            />
+          <div className="field-row">
+            <div className="field">
+              <label>Telefone (WhatsApp)</label>
+              <input
+                value={form.phone}
+                onChange={(e) => update("phone", e.target.value)}
+                placeholder="Ex.: 11987654321 (com DDD)"
+              />
+            </div>
+            <div className="field">
+              <label>E-mail (opcional)</label>
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => update("email", e.target.value)}
+                placeholder="morador@exemplo.com"
+              />
+            </div>
           </div>
+          <p className="text-muted" style={{ marginTop: -6, marginBottom: 12, fontSize: 12 }}>
+            Com o e-mail cadastrado, o morador pode receber um aviso automático quando a encomenda chegar (se essa
+            função estiver ligada nas Configurações).
+          </p>
 
           <div className="field">
             <label>Observações (opcional)</label>

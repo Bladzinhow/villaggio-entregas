@@ -98,3 +98,107 @@ create policy "submissions: qualquer um pode enviar (horario util)"
       )
     )
   );
+
+-- ---------- 007: papéis de acesso (síndico vs. porteiro) ----------
+
+drop policy if exists "profiles: sindico pode atualizar papeis" on profiles;
+
+create policy "profiles: sindico pode atualizar papeis"
+  on profiles for update
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role = 'sindico'
+    )
+  );
+
+alter table packages add column if not exists delivered_by uuid references profiles(id);
+
+-- ---------- 008: configurações, notificação por e-mail, retirada por link e IA ----------
+
+create table if not exists app_settings (
+  id boolean primary key default true,
+  aging_alert_days int not null default 7,
+  aging_expire_days int not null default 30,
+  custom_message text,
+  notify_email_enabled boolean not null default false,
+  ai_scan_enabled boolean not null default false,
+  updated_at timestamptz not null default now(),
+  constraint app_settings_singleton check (id)
+);
+
+insert into app_settings (id) values (true)
+  on conflict (id) do nothing;
+
+alter table app_settings enable row level security;
+
+drop policy if exists "app_settings: leitura publica" on app_settings;
+create policy "app_settings: leitura publica"
+  on app_settings for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "app_settings: sindico pode atualizar" on app_settings;
+create policy "app_settings: sindico pode atualizar"
+  on app_settings for update
+  to authenticated
+  using (
+    exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role = 'sindico'
+    )
+  );
+
+alter table residents add column if not exists email text;
+
+alter table packages add column if not exists pickup_token uuid not null default gen_random_uuid();
+
+create unique index if not exists packages_pickup_token_idx on packages (pickup_token);
+
+create or replace function public.get_package_by_pickup_token(p_token uuid)
+returns table (
+  id uuid,
+  recipient_name text,
+  street text,
+  house_number text,
+  carrier text,
+  description text,
+  status text,
+  received_at timestamptz,
+  delivered_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select id, recipient_name, street, house_number, carrier, description,
+         status, received_at, delivered_at
+  from packages
+  where pickup_token = p_token
+  limit 1;
+$$;
+
+create or replace function public.confirm_pickup_by_token(p_token uuid, p_picked_up_by text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_rows int;
+begin
+  update packages
+  set status = 'entregue',
+      delivered_at = now(),
+      picked_up_by = coalesce(nullif(trim(p_picked_up_by), ''), 'Confirmado pelo morador')
+  where pickup_token = p_token
+    and status = 'pendente';
+
+  get diagnostics updated_rows = row_count;
+  return updated_rows > 0;
+end;
+$$;
+
+grant execute on function public.get_package_by_pickup_token(uuid) to anon, authenticated;
+grant execute on function public.confirm_pickup_by_token(uuid, text) to anon, authenticated;

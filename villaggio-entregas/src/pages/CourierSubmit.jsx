@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
-import { uploadPackagePhoto, isWithinBusinessHours, BUSINESS_HOURS_LABEL } from "../utils";
+import { uploadPackagePhoto, isWithinBusinessHours, BUSINESS_HOURS_LABEL, getSettings, scanLabelWithAI } from "../utils";
+import { runFreeOcr } from "../ocr";
 import BarcodeScannerButton from "../components/BarcodeScannerButton";
+import FreeOcrButton from "../components/FreeOcrButton";
 
 const CARRIERS = ["Shopee", "Mercado Livre", "Amazon", "Correios", "Transportadora", "Outro"];
 
@@ -42,6 +44,10 @@ const emptyForm = () => ({
 });
 
 export default function CourierSubmit() {
+  const [step, setStep] = useState("photo"); // "photo" | "form"
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  const captureInputRef = useRef(null);
+
   const [form, setForm] = useState(emptyForm());
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
@@ -49,12 +55,72 @@ export default function CourierSubmit() {
   const [error, setError] = useState("");
   const [justSent, setJustSent] = useState(false);
   const [withinHours, setWithinHours] = useState(isWithinBusinessHours());
+  const [aiScanEnabled, setAiScanEnabled] = useState(false);
+  const [aiFilledFields, setAiFilledFields] = useState({});
 
   // Ao abrir a página, pré-preenche com os últimos dados "repetíveis" salvos neste aparelho
   useEffect(() => {
     const remembered = loadRemembered();
     setForm((f) => ({ ...f, ...remembered }));
+    getSettings().then((s) => setAiScanEnabled(!!s.ai_scan_enabled));
   }, []);
+
+  function applyResult(result, filledMap) {
+    setForm((f) => {
+      const next = { ...f };
+      if (result.tracking_code) { next.tracking_code = result.tracking_code; filledMap.tracking_code = true; }
+      if (result.recipient_name) { next.recipient_name = result.recipient_name; filledMap.recipient_name = true; }
+      if (result.street) { next.street = result.street; filledMap.street = true; }
+      if (result.house_number) { next.house_number = result.house_number; filledMap.house_number = true; }
+      if (result.carrier && CARRIERS.includes(result.carrier)) { next.carrier = result.carrier; filledMap.carrier = true; }
+      return next;
+    });
+  }
+
+  // Passo 1: a foto da etiqueta vira também a foto da encomenda, e é lida
+  // automaticamente (grátis, e com IA também se estiver ligada) antes de
+  // seguir para o formulário já preenchido.
+  async function handleCaptureLabel(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setReadingPhoto(true);
+
+    const filled = {};
+    try {
+      const freeResult = await runFreeOcr(file);
+      applyResult(freeResult, filled);
+    } catch {
+      // segue sem travar — formulário fica pronto pra preencher à mão
+    }
+
+    if (aiScanEnabled) {
+      try {
+        const aiResult = await scanLabelWithAI(file);
+        applyResult(aiResult, filled);
+      } catch {
+        // IA falhou/não configurada — já temos o que o OCR grátis conseguiu
+      }
+    }
+
+    setAiFilledFields(filled);
+    setReadingPhoto(false);
+    setStep("form");
+  }
+
+  function skipPhotoStep() {
+    setStep("form");
+  }
+
+  function handleFreeOcrResult(result) {
+    if (result.tracking_code) {
+      setForm((f) => ({ ...f, tracking_code: result.tracking_code }));
+      setAiFilledFields((prev) => ({ ...prev, tracking_code: true }));
+    }
+  }
 
   // Reavalia o horário periodicamente, caso a pessoa deixe a tela aberta
   // e o horário mude enquanto isso (ex.: passou das 18h).
@@ -123,7 +189,9 @@ export default function CourierSubmit() {
     setForm({ ...emptyForm(), ...remembered });
     setPhotoFile(null);
     setPhotoPreview(null);
+    setAiFilledFields({});
     setJustSent(false);
+    setStep("photo");
   }
 
   if (!withinHours) {
@@ -163,6 +231,55 @@ export default function CourierSubmit() {
     );
   }
 
+  if (step === "photo") {
+    return (
+      <div className="login-shell">
+        <div className="login-card" style={{ maxWidth: 440 }}>
+          <div className="login-mark">V</div>
+          <h1>Villaggio Paradiso</h1>
+          <p className="login-sub">Cadastro de encomenda — Entregador</p>
+
+          <div className="photo-first-box">
+            {readingPhoto ? (
+              <>
+                {photoPreview && (
+                  <img src={photoPreview} alt="Prévia da foto" className="photo-first-preview" />
+                )}
+                <p className="photo-first-status">🔎 Lendo a etiqueta...</p>
+              </>
+            ) : (
+              <>
+                <div className="photo-first-icon">📷</div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => captureInputRef.current?.click()}
+                >
+                  Tirar foto da etiqueta
+                </button>
+                <input
+                  ref={captureInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleCaptureLabel}
+                  style={{ display: "none" }}
+                />
+                <p className="text-muted" style={{ fontSize: 12.5, marginTop: 10 }}>
+                  Essa foto já fica como prova de entrega e é lida automaticamente para agilizar o preenchimento.
+                </p>
+              </>
+            )}
+          </div>
+
+          <button className="btn btn-ghost full-width" onClick={skipPhotoStep} disabled={readingPhoto}>
+            Preencher manualmente, sem foto
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="login-shell">
       <div className="login-card" style={{ maxWidth: 440 }}>
@@ -171,6 +288,16 @@ export default function CourierSubmit() {
         <p className="login-sub">Cadastro de encomenda — Entregador</p>
 
         {error && <div className="login-error">{error}</div>}
+
+        {!photoPreview && (
+          <div className="form-section ai-section">
+            <div className="form-section-title">📷 Ainda dá tempo</div>
+            <p className="text-muted" style={{ marginTop: -4, marginBottom: 10, fontSize: 13 }}>
+              Pode tirar a foto da etiqueta agora para preencher os campos abaixo.
+            </p>
+            <FreeOcrButton onResult={handleFreeOcrResult} />
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="field">
@@ -182,6 +309,7 @@ export default function CourierSubmit() {
               required
               autoFocus
             />
+            {aiFilledFields.recipient_name && <span className="ai-filled-hint">✨ preenchido automaticamente — confira</span>}
           </div>
 
           <div className="field-row">
@@ -193,6 +321,7 @@ export default function CourierSubmit() {
                 placeholder="Ex.: Rua Belluno"
                 required
               />
+              {aiFilledFields.street && <span className="ai-filled-hint">✨ automático</span>}
             </div>
             <div className="field">
               <label>Número / Unidade</label>
@@ -201,6 +330,7 @@ export default function CourierSubmit() {
                 onChange={(e) => update("house_number", e.target.value)}
                 placeholder="Ex.: 128"
               />
+              {aiFilledFields.house_number && <span className="ai-filled-hint">✨ automático</span>}
             </div>
           </div>
 
@@ -215,6 +345,7 @@ export default function CourierSubmit() {
               />
               <BarcodeScannerButton onScan={(text) => update("tracking_code", text)} />
             </div>
+            {aiFilledFields.tracking_code && <span className="ai-filled-hint">✨ preenchido automaticamente — confira</span>}
           </div>
 
           <div className="field">
@@ -227,7 +358,7 @@ export default function CourierSubmit() {
           </div>
 
           <div className="field">
-            <label>Foto da encomenda (opcional, recomendado)</label>
+            <label>Foto da encomenda{photoPreview ? "" : " (opcional, recomendado)"}</label>
             {photoPreview ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <img

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { buildWhatsAppLink, defaultArrivalMessage, daysSince, AGING_THRESHOLD_DAYS } from "../utils";
+import { buildWhatsAppLink, defaultArrivalMessage, daysSince, AGING_THRESHOLD_DAYS, buildPickupLink } from "../utils";
 
 const OCCURRENCE_TYPES = [
   { value: "avaria", label: "Avaria" },
@@ -7,7 +7,7 @@ const OCCURRENCE_TYPES = [
   { value: "outro", label: "Outro" },
 ];
 
-export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onEdit, onRegisterOccurrence, nameForProfileId }) {
+export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onEdit, onRegisterOccurrence, nameForProfileId, agingAlertDays }) {
   const isDelivered = pkg.status === "entregue";
   const [confirming, setConfirming] = useState(false);
   const [pickedUpBy, setPickedUpBy] = useState("");
@@ -15,13 +15,21 @@ export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onE
   const [occurring, setOccurring] = useState(false);
   const [occType, setOccType] = useState("avaria");
   const [occNote, setOccNote] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const whatsappHref = residentPhone
     ? buildWhatsAppLink(residentPhone, defaultArrivalMessage(pkg))
     : null;
 
   const ageDays = daysSince(pkg.received_at);
-  const isAging = !isDelivered && ageDays >= AGING_THRESHOLD_DAYS;
+  const isAging = !isDelivered && ageDays >= (agingAlertDays || AGING_THRESHOLD_DAYS);
+
+  function copyPickupLink() {
+    const link = buildPickupLink(pkg.pickup_token);
+    navigator.clipboard?.writeText(link);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }
 
   async function handleConfirm() {
     setBusy(true);
@@ -114,6 +122,11 @@ export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onE
           {!isDelivered && (
             <button className="btn btn-primary btn-sm" onClick={() => setConfirming(true)}>
               Confirmar entrega
+            </button>
+          )}
+          {!isDelivered && pkg.pickup_token && (
+            <button className="btn btn-ghost btn-sm" onClick={copyPickupLink}>
+              {linkCopied ? "Link copiado!" : "Copiar link de retirada"}
             </button>
           )}
           <button className="btn btn-ghost btn-sm" onClick={() => onEdit(pkg)}>

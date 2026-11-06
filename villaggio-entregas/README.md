@@ -306,3 +306,81 @@ Isso é opcional — o app já funciona bem dos dois jeitos, mostrando a mensage
 3. Abra o e-mail recebido (verifique também a caixa de spam) e clique no link.
 4. Uma nova tela abrirá para digitar a nova senha duas vezes.
 5. Depois de salvar, a pessoa já entra automaticamente no app com a nova senha.
+
+## Parte 13 — Configurações do síndico, e-mail automático, retirada por link e leitura de etiqueta por IA
+
+Esta parte foi inspirada numa análise comparativa com um concorrente (Chegou Entrega) e adiciona quatro coisas:
+
+1. Uma aba **Configurações** (só síndico edita) para ajustar regras sem precisar mexer em código.
+2. **E-mail automático** ao morador quando a encomenda chega (opcional — precisa de uma conta gratuita na Resend).
+3. Um **link de retirada** por encomenda, que o morador pode usar para confirmar sozinho que já retirou.
+4. **"Preencher com IA"**: tira foto da etiqueta e a IA tenta preencher o formulário sozinha (opcional — precisa de uma conta paga na API da Anthropic, mas o custo é muito baixo — veja a estimativa abaixo).
+
+As três primeiras coisas (Configurações, regras de armazenamento, link de retirada) já funcionam assim que você subir o código — não dependem de nada pago. Só o e-mail automático e a leitura por IA são opcionais e desligados por padrão até você configurar.
+
+### Passo 1 — Rodar a migração no Supabase
+
+Rode **`supabase/migration_008_config_notificacoes_ia.sql`** no SQL Editor do Supabase (ou, se for uma instalação nova, o `migration_all_in_one.sql` atualizado já inclui tudo).
+
+### Passo 2 — Usar o que já funciona sem configuração extra
+
+- Vá na aba **Configurações** (novo item no menu) para ajustar "avisar depois de quantos dias parada" e a mensagem personalizada.
+- Em cada encomenda pendente, agora existe um botão **"Copiar link de retirada"** — você pode colar esse link numa mensaga de WhatsApp manual, por exemplo, para o morador confirmar a retirada sozinho pelo celular.
+- No cadastro de morador, agora há um campo de **e-mail** (opcional) — vale cadastrar mesmo antes de ligar o envio automático, já deixa pronto para quando ligar.
+
+### Passo 3 (opcional) — Ligar o e-mail automático ao morador
+
+Isso precisa de uma conta na **Resend** (serviço de envio de e-mail, tem plano gratuito de até 3.000 e-mails/mês) e de publicar um Edge Function no Supabase.
+
+1. Crie uma conta gratuita em [resend.com](https://resend.com).
+2. **Importante sobre o remetente:** para enviar e-mails de verdade para os moradores (e não só para o seu próprio e-mail de cadastro), a Resend pede para você **verificar um domínio** seu. Como a AMVP já usa o domínio `villaggioparadiso.org.br` (vocês têm o e-mail entregas@villaggioparadiso.org.br), em **Resend → Domains → Add Domain**, adicione `villaggioparadiso.org.br` e siga as instruções para adicionar os registros DNS pedidos — isso provavelmente precisa de quem administra o domínio/hospedagem do site da AMVP. Se não tiver esse acesso agora, pode pular este passo por enquanto; o e-mail só vai conseguir ser testado com o seu próprio e-mail de cadastro na Resend até o domínio ser verificado.
+3. Em **Resend → API Keys**, crie uma chave e copie (começa com `re_...`).
+4. No Supabase, vá em **Edge Functions** (menu da esquerda) → **Deploy a new function** → **Via Editor**.
+5. Dê o nome **`notify-arrival`**, apague o código de exemplo e cole o conteúdo do arquivo `supabase/functions/notify-arrival/index.ts` (está na pasta do projeto). Clique em **Deploy function**.
+6. Ainda na área de Edge Functions, procure por **Secrets** (segredos/variáveis de ambiente) e adicione:
+   - `RESEND_API_KEY` = a chave que você copiou no passo 3
+   - `NOTIFY_FROM_EMAIL` = um e-mail do domínio verificado (ex.: `entregas@villaggioparadiso.org.br`) — se ainda não verificou o domínio, deixe este de fora por enquanto
+   - `SITE_URL` = `https://entregas-villaggio.vercel.app`
+7. Volte no app, vá em **Configurações** e marque **"Notificar morador por e-mail automaticamente"**, depois **Salvar**.
+8. Cadastre o e-mail de pelo menos um morador de teste e registre uma encomenda pendente para esse endereço, para conferir se o e-mail chega.
+
+Se o e-mail não chegar, nenhum cadastro quebra — o app simplesmente não envia nada, como se a função não existisse.
+
+### Passo 4 (opcional) — Ligar a leitura de etiqueta por IA ("Preencher com IA")
+
+Isso precisa de uma conta na **API da Anthropic** — é diferente da sua assinatura do Claude que você usa para conversar aqui: é uma conta separada, pré-paga por uso, em [console.anthropic.com](https://console.anthropic.com).
+
+**Estimativa de custo:** cada foto analisada custa, em média, menos de US$ 0,001 (um décimo de centavo de dólar) usando o modelo Claude Haiku — ou seja, mesmo com 500 encomendas fotografadas por mês, o custo fica abaixo de US$ 0,50/mês (menos de R$ 3). É um custo bem baixo frente ao ganho de tempo, mas exige cadastrar um cartão na Anthropic e acompanhar o consumo.
+
+1. Crie uma conta em [console.anthropic.com](https://console.anthropic.com), adicione um método de pagamento e gere uma chave de API (começa com `sk-ant-...`). **Guarde essa chave com cuidado — nunca cole ela no chat comigo nem em nenhum lugar público.**
+2. No Supabase, vá em **Edge Functions** → **Deploy a new function** → **Via Editor**.
+3. Dê o nome **`scan-label`**, apague o código de exemplo e cole o conteúdo do arquivo `supabase/functions/scan-label/index.ts`. Clique em **Deploy function**.
+4. Em **Secrets**, adicione `ANTHROPIC_API_KEY` com a chave gerada no passo 1.
+5. Volte no app, vá em **Configurações** e marque **"Leitura de etiqueta por IA"**, depois **Salvar**.
+6. O botão **"✨ Preencher com IA"** vai aparecer tanto no cadastro manual da portaria quanto na tela pública do entregador (`/nova`). Teste tirando foto de uma etiqueta de verdade — os campos preenchidos pela IA ficam marcados com "✨ preenchido pela IA — confira", para lembrar de sempre conferir antes de salvar.
+
+Igual ao e-mail: se a IA não estiver configurada ou der erro, o app mostra uma mensagem amigável e o cadastro manual continua funcionando normalmente — nunca trava.
+
+### Passo 5 — Leitura gratuita (sem IA, sem conta, sem custo)
+
+Além do "Preencher com IA" (pago), existe um segundo botão, **"🆓 Ler etiqueta (grátis)"**, que já funciona sem nenhuma configuração — não precisa de conta nem de chave de API.
+
+Ele usa uma tecnologia chamada OCR (reconhecimento de texto em imagem), rodando diretamente no celular/computador de quem está usando, por meio da biblioteca gratuita e de código aberto [Tesseract.js](https://github.com/naptha/tesseract.js).
+
+**Diferença em relação à versão com IA:**
+- A versão gratuita só lê o texto que está na etiqueta e tenta "adivinhar" qual trecho é o código de rastreio (procurando um padrão de letras e números, como o formato dos Correios). Ela preenche automaticamente só o campo de código de rastreio.
+- Ela também mostra, num link "Ver texto lido na etiqueta", tudo que conseguiu ler na foto — então mesmo sem preencher nome/rua sozinha, ajuda a portaria a copiar essas informações mais rápido do que digitar do zero olhando a etiqueta.
+- A versão paga com IA (Claude) entende o que é nome, rua, transportadora etc. e preenche todos os campos, não só o rastreio — por isso é mais completa, mas tem o pequeno custo mostrado no Passo 4.
+
+Pode usar as duas, só uma, ou nenhuma — ficam sempre lado a lado no formulário.
+
+### Passo 6 — Cadastro agora começa pela foto
+
+O fluxo de "Nova encomenda" (tanto na portaria quanto na tela do entregador `/nova`) mudou de ordem:
+
+1. Primeiro aparece uma tela só com o botão **"Tirar foto da etiqueta"**.
+2. Ao tirar a foto, o app lê automaticamente (leitura grátis, e também a IA se estiver ligada) e **já avança para o formulário preenchido**, pronto para conferir e corrigir o que estiver errado ou faltando.
+3. Essa mesma foto da etiqueta já fica salva como a foto/prova da encomenda — não precisa tirar duas fotos.
+4. Quem não tiver uma etiqueta legível (ou preferir não tirar foto) pode clicar em **"Preencher manualmente, sem foto"** e cadastrar do jeito tradicional, digitando tudo.
+
+Os campos que vieram da leitura automática ficam marcados com "✨ preenchido automaticamente — confira", para lembrar sempre de dar uma conferida antes de salvar — a leitura (grátis ou paga) nunca é garantida 100%, por isso o controle final continua sempre com quem está cadastrando.

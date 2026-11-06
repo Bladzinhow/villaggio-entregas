@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import CourierSubmit from "./pages/CourierSubmit";
 import ResetPassword from "./pages/ResetPassword";
+import PickupConfirm from "./pages/PickupConfirm";
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = ainda carregando
@@ -20,6 +21,12 @@ export default function App() {
   // uma sessão temporária).
   if (window.location.pathname === "/redefinir-senha") {
     return <ResetPassword />;
+  }
+
+  // Rota pública: /retirar é aberta pelo link enviado ao morador (e-mail
+  // ou link copiado pela portaria) para confirmar a retirada sem login.
+  if (window.location.pathname === "/retirar") {
+    return <PickupConfirm />;
   }
 
   useEffect(() => {
