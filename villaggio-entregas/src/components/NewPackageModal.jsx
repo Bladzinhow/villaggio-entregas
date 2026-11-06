@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { findDuplicateTracking, uploadPackagePhoto } from "../utils";
+import BarcodeScannerButton from "./BarcodeScannerButton";
 
 const CARRIERS = ["Shopee", "Mercado Livre", "Amazon", "Correios", "Transportadora", "Outro"];
 
@@ -154,11 +155,15 @@ export default function NewPackageModal({ onClose, onCreated, profileId, editing
 
           <div className="field">
             <label>Código de rastreio (opcional)</label>
-            <input
-              value={form.tracking_code}
-              onChange={(e) => update("tracking_code", e.target.value)}
-              placeholder="Ex.: BR265724656594I"
-            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                style={{ flex: 1 }}
+                value={form.tracking_code}
+                onChange={(e) => update("tracking_code", e.target.value)}
+                placeholder="Ex.: BR265724656594I"
+              />
+              <BarcodeScannerButton onScan={(text) => update("tracking_code", text)} />
+            </div>
           </div>
 
           <div className="field">

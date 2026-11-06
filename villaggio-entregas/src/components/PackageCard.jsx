@@ -7,7 +7,7 @@ const OCCURRENCE_TYPES = [
   { value: "outro", label: "Outro" },
 ];
 
-export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onEdit, onRegisterOccurrence }) {
+export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onEdit, onRegisterOccurrence, nameForProfileId }) {
   const isDelivered = pkg.status === "entregue";
   const [confirming, setConfirming] = useState(false);
   const [pickedUpBy, setPickedUpBy] = useState("");
@@ -79,15 +79,23 @@ export default function PackageCard({ pkg, residentPhone, onConfirmDelivery, onE
         <span className={`status-pill ${pkg.status}`}>{pkg.status}</span>
         {pkg.courier_name && <span>Entregador: {pkg.courier_name}{pkg.courier_cpf ? ` · CPF ${pkg.courier_cpf}` : ""}</span>}
         <span>{new Date(pkg.received_at).toLocaleString("pt-BR")}</span>
+        {nameForProfileId?.(pkg.received_by) && <span>Registrado por: {nameForProfileId(pkg.received_by)}</span>}
       </div>
 
       {pkg.tracking_code && (
         <div className="package-tracking mono">{pkg.tracking_code}</div>
       )}
 
-      {isDelivered && pkg.picked_up_by && (
+      {isDelivered && (
         <div className="package-meta" style={{ marginTop: 4 }}>
-          <span>Retirado por: {pkg.picked_up_by}</span>
+          {pkg.picked_up_by && <span>Retirado por: {pkg.picked_up_by}</span>}
+          {nameForProfileId?.(pkg.delivered_by) && <span>Confirmado por: {nameForProfileId(pkg.delivered_by)}</span>}
+        </div>
+      )}
+
+      {pkg.occurrence_type && nameForProfileId?.(pkg.occurrence_by) && (
+        <div className="package-meta" style={{ marginTop: 4 }}>
+          <span>Ocorrência registrada por: {nameForProfileId(pkg.occurrence_by)}</span>
         </div>
       )}
 

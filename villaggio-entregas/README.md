@@ -212,3 +212,97 @@ Não precisa de nenhuma migração nova no banco — as permissões já existiam
 Não é mais necessário usar o Table Editor do Supabase para isso no dia a dia — só use se precisar importar vários de uma vez via CSV (como fizemos com a planilha do Group Software).
 
 **Lembrete:** a rua e o número do morador precisam bater exatamente com o que é digitado no cadastro das encomendas para o botão de WhatsApp aparecer.
+
+---
+
+## Parte 10 — Histórico de conferência (auditoria)
+
+Não precisa de migração nova — os dados recusados/aceitos já estavam sendo salvos no banco desde o início, só não apareciam em nenhuma tela.
+
+### O que mudou
+
+- A aba **Conferência** agora tem sub-abas: **Aguardando**, **Recusadas**, **Aceitas** e **Todas**.
+- Nada that é recusado "desaparece" mais — fica registrado com o motivo da recusa e a data/hora, disponível para consulta a qualquer momento.
+- Botão **Exportar Excel** dentro da Conferência agora exporta o histórico da sub-aba selecionada (útil para auditoria).
+
+---
+
+## Parte 11 — Papéis de acesso, App instalável (PWA) e Leitor de código de barras
+
+### Se você já rodou as migrações anteriores
+
+Rode só o arquivo **`supabase/migration_007_roles.sql`** no SQL Editor.
+
+### 1. Papéis de acesso (Síndico vs. Porteiro)
+
+- Nova aba **"Equipe"**, mostrando todo mundo que já tem conta, com o papel de cada um.
+- Só **síndicos** podem promover/rebaixar outros membros da equipe (botão "Tornar Síndico"/"Tornar Porteiro").
+- Só síndicos podem **remover moradores** da lista (porteiros continuam podendo cadastrar/editar).
+- **Todo mundo que criar conta pela primeira vez começa como Porteiro** — por segurança, ninguém consegue virar síndico sozinho; precisa que outro síndico já existente promova.
+
+**Importante:** como ainda não existe nenhum síndico cadastrado, o **primeiro** precisa ser promovido direto no Supabase (Table Editor → `profiles` → editar a linha da pessoa → mudar `role` de `porteiro` para `sindico`). Depois disso, essa pessoa já consegue promover as próximas pelo próprio app.
+
+Além disso, agora aparece nos cards **quem da equipe** registrou, confirmou a entrega, ou registrou a ocorrência de cada encomenda — e isso também entra no relatório Excel.
+
+### 2. App instalável (PWA)
+
+O site agora pode ser "instalado" na tela inicial do celular, com ícone próprio e abrindo em tela cheia (sem barra do navegador):
+
+- **Android/Chrome:** abra o site, toque no menu (⋮) → "Instalar aplicativo" ou "Adicionar à tela inicial".
+- **iPhone/Safari:** abra o site, toque no ícone de compartilhar (□↑) → "Adicionar à Tela de Início".
+
+Não precisa de nenhuma conta de desenvolvedor nem loja de aplicativos — é gratuito e funciona direto pelo navegador.
+
+### 3. Leitor de código de barras/QR
+
+Um botão **"📷 Escanear código"** foi adicionado ao lado do campo de código de rastreio, tanto no cadastro manual quanto na tela do entregador. Ele abre a câmera do celular e preenche o campo automaticamente ao reconhecer um código de barras ou QR code. Se não conseguir ler, é só digitar manualmente — nunca trava o cadastro.
+
+**Sobre o leitor físico que vocês têm na administração:** leitores de código de barras USB/Bluetooth tradicionais funcionam como um teclado — quando conectados, basta clicar dentro do campo "Código de rastreio" e escanear o código com o leitor; ele "digita" o código sozinho e já devia funcionar sem nenhuma configuração extra. Vale testar!
+
+## Parte 12 — Correção do "congelamento" ao criar conta + recuperação de senha
+
+### O que estava acontecendo
+
+A tela de login "travava" (sem erro, sem sucesso) ao clicar em "Criar conta" porque, por padrão, o Supabase exige **confirmação por e-mail** antes de liberar o login. A conta estava sendo criada normalmente, mas como o app não mostrava nenhuma mensagem sobre isso, parecia que nada tinha acontecido. O mesmo tipo de silêncio acontecia ao tentar cadastrar de novo um e-mail que já tinha conta.
+
+Isso foi corrigido na tela de login, que agora sempre mostra uma mensagem — seja de sucesso, de erro, ou avisando para confirmar o e-mail.
+
+Além disso, foi adicionado um botão **"Recuperar senha"** na tela de login, usando o recurso oficial de recuperação de senha do Supabase.
+
+### Se você já rodou as migrações anteriores
+
+Esta parte é só código do app (frontend) — **não precisa rodar nenhuma migração SQL nova**. Basta atualizar o GitHub/Vercel com os arquivos desta pasta.
+
+### Passo a passo: configurar o Supabase para os e-mails funcionarem
+
+Para os e-mails de confirmação de conta e de recuperação de senha chegarem com o link correto (apontando para o site de vocês, e não para "localhost"), configure uma vez no Supabase:
+
+1. No painel do Supabase, abra o projeto do app.
+2. No menu da esquerda, clique em **Authentication**.
+3. Clique em **URL Configuration** (ou "Configuração de URL").
+4. Em **Site URL**, coloque o endereço do site de produção, por exemplo: `https://entregas-villaggio.vercel.app`
+5. Em **Redirect URLs**, adicione (uma por linha, ou clicando em "Add URL"):
+   - `https://entregas-villaggio.vercel.app/*`
+   - `https://villaggio-entregas-rkd2.vercel.app/*` (o domínio antigo, caso algum link antigo ainda esteja em uso)
+6. Clique em **Save**.
+
+Sem esse passo, o link de "Recuperar senha" pode abrir uma página que não existe (ou aponta para `localhost`), mesmo que o e-mail tenha sido enviado corretamente.
+
+### Opcional: desativar a exigência de confirmar e-mail (simplifica o uso interno)
+
+Como este app é usado só pela equipe interna (síndico e porteiros, não pelos moradores), pode valer a pena **desativar** a exigência de confirmação por e-mail, para que criar uma conta já libere o acesso imediatamente, sem precisar abrir e-mail nenhum:
+
+1. No Supabase, vá em **Authentication → Providers**.
+2. Clique em **Email**.
+3. Desative a opção **"Confirm email"**.
+4. Clique em **Save**.
+
+Isso é opcional — o app já funciona bem dos dois jeitos, mostrando a mensagem certa em cada caso. Mas se a equipe achar o passo de confirmar e-mail desnecessário, essa opção remove ele.
+
+### Como usar a recuperação de senha
+
+1. Na tela de login, clique em **"Recuperar senha"**.
+2. Digite o e-mail da conta e clique em **"Enviar link de recuperação"**.
+3. Abra o e-mail recebido (verifique também a caixa de spam) e clique no link.
+4. Uma nova tela abrirá para digitar a nova senha duas vezes.
+5. Depois de salvar, a pessoa já entra automaticamente no app com a nova senha.

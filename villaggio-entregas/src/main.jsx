@@ -8,3 +8,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+// Registra o service worker (necessário para o navegador oferecer
+// "Instalar app" / "Adicionar à tela inicial").
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}

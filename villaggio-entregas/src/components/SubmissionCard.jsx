@@ -8,10 +8,11 @@ const REJECTION_REASONS = [
   "Outro motivo",
 ];
 
-export default function SubmissionCard({ submission, onAccept, onReject }) {
+export default function SubmissionCard({ submission, onAccept, onReject, nameForProfileId }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState(REJECTION_REASONS[0]);
   const [busy, setBusy] = useState(false);
+  const isPending = submission.status === "pendente";
 
   async function handleAccept() {
     setBusy(true);
@@ -26,7 +27,7 @@ export default function SubmissionCard({ submission, onAccept, onReject }) {
   }
 
   return (
-    <div className="package-card pendente">
+    <div className={`package-card ${isPending ? "pendente" : submission.status === "recusado" ? "" : "entregue"}`}>
       <div className="package-top">
         <div>
           <div className="package-recipient">{submission.recipient_name}</div>
@@ -34,11 +35,25 @@ export default function SubmissionCard({ submission, onAccept, onReject }) {
             {submission.street}{submission.house_number ? `, ${submission.house_number}` : ""}
           </div>
         </div>
-        <span className="carrier-badge">{submission.carrier}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+          <span className="carrier-badge">{submission.carrier}</span>
+          {!isPending && (
+            <span className={`status-pill ${submission.status === "recusado" ? "" : "entregue"}`}
+              style={submission.status === "recusado" ? { background: "#FBEAE8", color: "#A6423A" } : {}}>
+              {submission.status === "recusado" ? "Recusada" : "Aceita"}
+            </span>
+          )}
+        </div>
       </div>
 
       {submission.description && (
         <div className="package-desc">{submission.description}</div>
+      )}
+
+      {submission.status === "recusado" && submission.rejection_reason && (
+        <div className="package-desc" style={{ background: "#FBEAE8", color: "#A6423A" }}>
+          Motivo: {submission.rejection_reason}
+        </div>
       )}
 
       {submission.photo_url && (
@@ -58,14 +73,20 @@ export default function SubmissionCard({ submission, onAccept, onReject }) {
             {submission.courier_cpf ? ` · CPF ${submission.courier_cpf}` : ""}
           </span>
         )}
-        <span>{new Date(submission.created_at).toLocaleString("pt-BR")}</span>
+        <span>Enviado em: {new Date(submission.created_at).toLocaleString("pt-BR")}</span>
+        {!isPending && submission.reviewed_at && (
+          <span>Conferido em: {new Date(submission.reviewed_at).toLocaleString("pt-BR")}</span>
+        )}
+        {!isPending && nameForProfileId?.(submission.reviewed_by) && (
+          <span>Conferido por: {nameForProfileId(submission.reviewed_by)}</span>
+        )}
       </div>
 
       {submission.tracking_code && (
         <div className="package-tracking mono">{submission.tracking_code}</div>
       )}
 
-      {!rejecting ? (
+      {!isPending ? null : !rejecting ? (
         <div className="package-actions">
           <button className="btn btn-primary btn-sm" onClick={handleAccept} disabled={busy}>
             {busy ? "Aguarde..." : "Aceitar"}

@@ -4,19 +4,21 @@ import PackageCard from "../components/PackageCard";
 import NewPackageModal from "../components/NewPackageModal";
 import SubmissionCard from "../components/SubmissionCard";
 import ResidentModal from "../components/ResidentModal";
-import { exportPackagesToExcel, findDuplicateTracking, daysSince, AGING_THRESHOLD_DAYS } from "../utils";
+import { exportPackagesToExcel, exportSubmissionsToExcel, findDuplicateTracking, daysSince, AGING_THRESHOLD_DAYS } from "../utils";
 
 export default function Dashboard({ profile, onLogout }) {
   const [packages, setPackages] = useState([]);
   const [residents, setResidents] = useState([]);
   const [submissions, setSubmissions] = useState([]);
-  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia | moradores
+  const [teamProfiles, setTeamProfiles] = useState([]);
+  const [filter, setFilter] = useState("pendente"); // pendente | entregue | todos | conferencia | moradores | equipe
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingPackage, setEditingPackage] = useState(null);
   const [showResidentModal, setShowResidentModal] = useState(false);
   const [editingResident, setEditingResident] = useState(null);
   const [residentSearch, setResidentSearch] = useState("");
   const [search, setSearch] = useState("");
+  const [confView, setConfView] = useState("pendente"); // pendente | recusado | aceito | todas
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,20 +27,37 @@ export default function Dashboard({ profile, onLogout }) {
 
   async function loadData() {
     setLoading(true);
-    const [{ data: pkgs }, { data: res }, { data: subs }] = await Promise.all([
+    const [{ data: pkgs }, { data: res }, { data: subs }, { data: team }] = await Promise.all([
       supabase.from("packages").select("*").order("received_at", { ascending: false }).limit(300),
       supabase.from("residents").select("*").order("street"),
       supabase
         .from("submissions")
         .select("*")
-        .eq("status", "pendente")
         .order("created_at", { ascending: false })
-        .limit(200),
+        .limit(500),
+      supabase.from("profiles").select("*").order("created_at"),
     ]);
     setPackages(pkgs || []);
     setResidents(res || []);
     setSubmissions(subs || []);
+    setTeamProfiles(team || []);
     setLoading(false);
+  }
+
+  function nameForProfileId(id) {
+    if (!id) return null;
+    return teamProfiles.find((p) => p.id === id)?.full_name || null;
+  }
+
+  const isSindico = profile?.role === "sindico";
+
+  async function updateTeamMemberRole(member, newRole) {
+    const { error } = await supabase.from("profiles").update({ role: newRole }).eq("id", member.id);
+    if (!error) {
+      setTeamProfiles((prev) => prev.map((p) => (p.id === member.id ? { ...p, role: newRole } : p)));
+    } else {
+      alert("Não foi possível atualizar. Só síndicos podem alterar papéis da equipe.");
+    }
   }
 
   async function acceptSubmission(submission) {
@@ -70,39 +89,53 @@ export default function Dashboard({ profile, onLogout }) {
     if (insertError) return;
 
     // 2) marca a submissão como aceita
+    const reviewed_at = new Date().toISOString();
     await supabase
       .from("submissions")
-      .update({ status: "aceito", reviewed_by: profile?.id, reviewed_at: new Date().toISOString() })
+      .update({ status: "aceito", reviewed_by: profile?.id, reviewed_at })
       .eq("id", submission.id);
 
-    setSubmissions((prev) => prev.filter((s) => s.id !== submission.id));
+    setSubmissions((prev) =>
+      prev.map((s) => (s.id === submission.id ? { ...s, status: "aceito", reviewed_by: profile?.id, reviewed_at } : s))
+    );
     loadData();
   }
 
   async function rejectSubmission(submission, reason) {
-    await supabase
+    const reviewed_at = new Date().toISOString();
+    const { error } = await supabase
       .from("submissions")
       .update({
         status: "recusado",
         rejection_reason: reason,
         reviewed_by: profile?.id,
-        reviewed_at: new Date().toISOString(),
+        reviewed_at,
       })
       .eq("id", submission.id);
 
-    setSubmissions((prev) => prev.filter((s) => s.id !== submission.id));
+    if (!error) {
+      setSubmissions((prev) =>
+        prev.map((s) =>
+          s.id === submission.id
+            ? { ...s, status: "recusado", rejection_reason: reason, reviewed_by: profile?.id, reviewed_at }
+            : s
+        )
+      );
+    }
   }
 
   async function confirmDelivery(pkg, pickedUpBy) {
     const delivered_at = new Date().toISOString();
     const { error } = await supabase
       .from("packages")
-      .update({ status: "entregue", delivered_at, picked_up_by: pickedUpBy || null })
+      .update({ status: "entregue", delivered_at, picked_up_by: pickedUpBy || null, delivered_by: profile?.id })
       .eq("id", pkg.id);
     if (!error) {
       setPackages((prev) =>
         prev.map((p) =>
-          p.id === pkg.id ? { ...p, status: "entregue", delivered_at, picked_up_by: pickedUpBy || null } : p
+          p.id === pkg.id
+            ? { ...p, status: "entregue", delivered_at, picked_up_by: pickedUpBy || null, delivered_by: profile?.id }
+            : p
         )
       );
     }
@@ -131,6 +164,10 @@ export default function Dashboard({ profile, onLogout }) {
   }
 
   async function deleteResident(resident) {
+    if (!isSindico) {
+      alert("Só síndicos podem remover moradores. Peça para um síndico da equipe fazer isso.");
+      return;
+    }
     if (!window.confirm(`Remover ${resident.full_name} da lista de moradores?`)) return;
     const { error } = await supabase.from("residents").delete().eq("id", resident.id);
     if (!error) {
@@ -148,6 +185,13 @@ export default function Dashboard({ profile, onLogout }) {
         r.house_number?.toLowerCase().includes(term)
     );
   }, [residents, residentSearch]);
+
+  const pendingSubmissions = useMemo(() => submissions.filter((s) => s.status === "pendente"), [submissions]);
+
+  const filteredSubmissions = useMemo(() => {
+    if (confView === "todas") return submissions;
+    return submissions.filter((s) => s.status === confView);
+  }, [submissions, confView]);
 
   function findResidentPhone(pkg) {
     const match = residents.find(
@@ -203,7 +247,7 @@ export default function Dashboard({ profile, onLogout }) {
           </div>
         </div>
         <div className="topbar-user">
-          <span>{profile?.full_name}</span>
+          <span>{profile?.full_name}{profile?.role === "sindico" ? " · Síndico" : " · Porteiro"}</span>
           <button className="logout-btn" onClick={onLogout}>Sair</button>
         </div>
       </div>
@@ -230,7 +274,7 @@ export default function Dashboard({ profile, onLogout }) {
           </div>
         </div>
 
-        {filter === "moradores" ? (
+        {filter === "equipe" ? null : filter === "moradores" ? (
           <>
             <div className="field" style={{ marginBottom: 16 }}>
               <input
@@ -256,12 +300,18 @@ export default function Dashboard({ profile, onLogout }) {
             </div>
 
             <div className="action-bar">
-              <button className="btn btn-primary" onClick={() => setShowNewModal(true)}>
-                + Nova encomenda
-              </button>
+              {filter !== "conferencia" && (
+                <button className="btn btn-primary" onClick={() => setShowNewModal(true)}>
+                  + Nova encomenda
+                </button>
+              )}
               <button
                 className="btn btn-ghost"
-                onClick={() => exportPackagesToExcel(filtered, `entregas-${filter}.xlsx`)}
+                onClick={() =>
+                  filter === "conferencia"
+                    ? exportSubmissionsToExcel(filteredSubmissions, `conferencia-${confView}.xlsx`, nameForProfileId)
+                    : exportPackagesToExcel(filtered, `entregas-${filter}.xlsx`, nameForProfileId)
+                }
               >
                 Exportar Excel
               </button>
@@ -284,8 +334,9 @@ export default function Dashboard({ profile, onLogout }) {
             ["pendente", "Pendentes"],
             ["entregue", "Entregues"],
             ["todos", "Todos"],
-            ["conferencia", `Conferência${submissions.length ? ` (${submissions.length})` : ""}`],
+            ["conferencia", `Conferência${pendingSubmissions.length ? ` (${pendingSubmissions.length})` : ""}`],
             ["moradores", `Moradores (${residents.length})`],
+            ["equipe", "Equipe"],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -297,7 +348,44 @@ export default function Dashboard({ profile, onLogout }) {
           ))}
         </div>
 
-        {filter === "moradores" ? (
+        {filter === "equipe" ? (
+          loading ? (
+            <p className="text-muted">Carregando...</p>
+          ) : (
+            <div className="package-list">
+              {teamProfiles.map((member) => (
+                <div key={member.id} className="package-card">
+                  <div className="package-top">
+                    <div>
+                      <div className="package-recipient">
+                        {member.full_name} {member.id === profile?.id && <span className="text-muted">(você)</span>}
+                      </div>
+                      <div className="package-address">
+                        Cadastrado em {new Date(member.created_at).toLocaleDateString("pt-BR")}
+                      </div>
+                    </div>
+                    <span className={`status-pill ${member.role === "sindico" ? "entregue" : "pendente"}`}>
+                      {member.role === "sindico" ? "Síndico" : "Porteiro"}
+                    </span>
+                  </div>
+                  {isSindico && member.id !== profile?.id && (
+                    <div className="package-actions">
+                      {member.role === "sindico" ? (
+                        <button className="btn btn-ghost btn-sm" onClick={() => updateTeamMemberRole(member, "porteiro")}>
+                          Tornar Porteiro
+                        </button>
+                      ) : (
+                        <button className="btn btn-ghost btn-sm" onClick={() => updateTeamMemberRole(member, "sindico")}>
+                          Tornar Síndico
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        ) : filter === "moradores" ? (
           loading ? (
             <p className="text-muted">Carregando...</p>
           ) : filteredResidents.length === 0 ? (
@@ -325,36 +413,61 @@ export default function Dashboard({ profile, onLogout }) {
                     <button className="btn btn-ghost btn-sm" onClick={() => setEditingResident(r)}>
                       Editar
                     </button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => deleteResident(r)}>
-                      Remover
-                    </button>
+                    {isSindico && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => deleteResident(r)}>
+                        Remover
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           )
         ) : filter === "conferencia" ? (
-          loading ? (
-            <p className="text-muted">Carregando...</p>
-          ) : submissions.length === 0 ? (
-            <div className="empty-state">
-              <div className="display">Nada para conferir</div>
-              <p className="text-muted">
-                Quando um entregador cadastrar uma encomenda pelo link público, ela aparece aqui.
-              </p>
-            </div>
-          ) : (
-            <div className="package-list">
-              {submissions.map((s) => (
-                <SubmissionCard
-                  key={s.id}
-                  submission={s}
-                  onAccept={acceptSubmission}
-                  onReject={rejectSubmission}
-                />
+          <>
+            <div className="tabs" style={{ marginBottom: 14 }}>
+              {[
+                ["pendente", `Aguardando${pendingSubmissions.length ? ` (${pendingSubmissions.length})` : ""}`],
+                ["recusado", "Recusadas"],
+                ["aceito", "Aceitas"],
+                ["todas", "Todas"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`tab ${confView === value ? "active" : ""}`}
+                  onClick={() => setConfView(value)}
+                >
+                  {label}
+                </button>
               ))}
             </div>
-          )
+            {loading ? (
+              <p className="text-muted">Carregando...</p>
+            ) : filteredSubmissions.length === 0 ? (
+              <div className="empty-state">
+                <div className="display">
+                  {confView === "pendente" ? "Nada para conferir" : "Nenhum registro aqui"}
+                </div>
+                <p className="text-muted">
+                  {confView === "pendente"
+                    ? "Quando um entregador cadastrar uma encomenda pelo link público, ela aparece aqui."
+                    : "Ainda não há histórico nesta categoria."}
+                </p>
+              </div>
+            ) : (
+              <div className="package-list">
+                {filteredSubmissions.map((s) => (
+                  <SubmissionCard
+                    key={s.id}
+                    submission={s}
+                    onAccept={acceptSubmission}
+                    onReject={rejectSubmission}
+                    nameForProfileId={nameForProfileId}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         ) : loading ? (
           <p className="text-muted">Carregando...</p>
         ) : filtered.length === 0 ? (
@@ -377,6 +490,7 @@ export default function Dashboard({ profile, onLogout }) {
                     onConfirmDelivery={confirmDelivery}
                     onEdit={setEditingPackage}
                     onRegisterOccurrence={registerOccurrence}
+                    nameForProfileId={nameForProfileId}
                   />
                 ))}
               </div>

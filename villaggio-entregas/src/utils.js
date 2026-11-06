@@ -103,7 +103,7 @@ export function defaultArrivalMessage({ recipient_name, carrier, street, house_n
   );
 }
 
-export function exportPackagesToExcel(packages, filename = "entregas.xlsx") {
+export function exportPackagesToExcel(packages, filename = "entregas.xlsx", nameForProfileId = () => null) {
   const rows = packages.map((p) => ({
     Destinatário: p.recipient_name,
     Rua: p.street,
@@ -115,14 +115,43 @@ export function exportPackagesToExcel(packages, filename = "entregas.xlsx") {
     "CPF do entregador": p.courier_cpf || "",
     Status: p.status,
     "Recebido em": p.received_at ? new Date(p.received_at).toLocaleString("pt-BR") : "",
+    "Registrado por": nameForProfileId(p.received_by) || "",
     "Entregue em": p.delivered_at ? new Date(p.delivered_at).toLocaleString("pt-BR") : "",
     "Retirado por": p.picked_up_by || "",
+    "Confirmado por": nameForProfileId(p.delivered_by) || "",
     Ocorrência: p.occurrence_type || "",
     "Detalhe da ocorrência": p.occurrence_note || "",
+    "Ocorrência registrada por": nameForProfileId(p.occurrence_by) || "",
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Entregas");
+  XLSX.writeFile(workbook, filename);
+}
+
+// Exporta o histórico da Conferência (aguardando, aceitas e recusadas) —
+// serve como registro de auditoria de tudo que foi cadastrado pelos
+// entregadores, mesmo o que foi recusado/cancelado.
+export function exportSubmissionsToExcel(submissions, filename = "conferencia.xlsx", nameForProfileId = () => null) {
+  const rows = submissions.map((s) => ({
+    Destinatário: s.recipient_name,
+    Rua: s.street,
+    Número: s.house_number || "",
+    Transportadora: s.carrier,
+    "Código de rastreio": s.tracking_code || "",
+    Descrição: s.description || "",
+    Entregador: s.courier_name || "",
+    "CPF do entregador": s.courier_cpf || "",
+    Status: s.status,
+    "Motivo da recusa": s.rejection_reason || "",
+    "Enviado em": s.created_at ? new Date(s.created_at).toLocaleString("pt-BR") : "",
+    "Conferido em": s.reviewed_at ? new Date(s.reviewed_at).toLocaleString("pt-BR") : "",
+    "Conferido por": nameForProfileId(s.reviewed_by) || "",
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Conferencia");
   XLSX.writeFile(workbook, filename);
 }

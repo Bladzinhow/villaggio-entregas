@@ -485,6 +485,16 @@ a { color: inherit; }
   margin-bottom: 12px;
 }
 
+.login-info {
+  background: #E8F3F0;
+  color: var(--green);
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
 .login-toggle {
   text-align: center;
   font-size: 13px;

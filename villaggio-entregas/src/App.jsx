@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import CourierSubmit from "./pages/CourierSubmit";
+import ResetPassword from "./pages/ResetPassword";
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = ainda carregando
@@ -12,6 +13,13 @@ export default function App() {
   // (rota simples por caminho, sem precisar de uma biblioteca de rotas)
   if (window.location.pathname === "/nova") {
     return <CourierSubmit />;
+  }
+
+  // Rota pública: /redefinir-senha é aberta pelo link do e-mail de
+  // recuperação de senha. Não exige login prévio (o próprio link cria
+  // uma sessão temporária).
+  if (window.location.pathname === "/redefinir-senha") {
+    return <ResetPassword />;
   }
 
   useEffect(() => {
